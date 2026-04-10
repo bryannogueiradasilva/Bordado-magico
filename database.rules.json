@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "products": {
+      ".read": true,
+      ".write": "true"
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.email === 'bryannogueira07@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'manager')",
+        ".write": "auth != null && (auth.uid === $uid || auth.token.email === 'bryannogueira07@gmail.com' || auth.token.email === 'bryannogueira07@gmail.com')"
+      }
+    },
+    "online": {
+      ".read": "auth != null",
+      "global": {
+        "$uid": {
+          ".write": "auth != null && auth.uid == $uid"
+        }
+      },
+      "paginas": {
+        "$paginaId": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    }
+  }
+}
