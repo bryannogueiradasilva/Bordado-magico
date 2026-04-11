@@ -186,57 +186,6 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
     setError('');
     try {
-      // 0. Master Bypass for Owner
-      if (data.email.toLowerCase().trim() === 'bryannogueira07@gmail.com' && data.password === 'admin123') {
-        console.log("Acesso Master detectado para o proprietário. Tentando autenticação Firebase...");
-        
-        let firebaseUser = null;
-        try {
-          const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
-          firebaseUser = userCredential.user;
-          console.log("Autenticação Firebase bem-sucedida para o mestre.");
-        } catch (fbErr: any) {
-          console.warn("Autenticação Firebase falhou para o mestre:", fbErr.code);
-          
-          // If user doesn't exist, try to create it automatically for the master owner
-          if (fbErr.code === 'auth/user-not-found') {
-            try {
-              console.log("Criando conta Firebase automaticamente para o proprietário...");
-              const { createUserWithEmailAndPassword } = await import('firebase/auth');
-              const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
-              firebaseUser = userCredential.user;
-              console.log("Conta Firebase criada com sucesso para o proprietário.");
-            } catch (createErr: any) {
-              console.error("Falha ao criar conta Firebase automática:", createErr);
-            }
-          }
-        }
-
-        const ownerUser: User = {
-          id: firebaseUser?.uid || 'master-owner-id',
-          name: 'Proprietário (Master)',
-          email: 'bryannogueira07@gmail.com',
-          whatsapp: '00000000000',
-          age: 99,
-          role: 'manager',
-          active: true,
-          status: 'active',
-          accessToken: 'MASTER_ACCESS',
-          createdAt: new Date().toISOString(),
-        };
-
-        storage.saveUsers([...storage.getUsers().filter(u => u.email !== ownerUser.email), ownerUser]);
-        storage.setCurrentUser(ownerUser);
-        onLogin(ownerUser);
-        
-        if (!firebaseUser) {
-          alert("Aviso: Você entrou via Bypass Local. A sincronização com a produção (Realtime Database) não funcionará até que você crie uma conta oficial com este e-mail e senha no botão 'Cadastre-se'.");
-        }
-        
-        navigate('/manager');
-        return;
-      }
-
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       const firebaseUser = userCredential.user;
 

@@ -23,11 +23,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Check for user in storage first for immediate UI
-    const currentUser = storage.getCurrentUser();
-    setUser(currentUser);
-
-    // 2. Sync with Firebase Auth state
+    // 1. Sync with Firebase Auth state
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         // Check email verification (Owner is exempt for convenience)
@@ -40,44 +36,33 @@ export default function App() {
           return;
         }
 
-        // If we have a firebase user but no local user, try to sync
-        if (!currentUser || currentUser.id !== fbUser.uid) {
-          try {
-            const syncedUser = await storage.getUserFromRTDB(fbUser.uid);
-            if (syncedUser) {
-              storage.setCurrentUser(syncedUser);
-              setUser(syncedUser);
-            } else {
-              // User exists in Auth but not in RTDB (maybe deleted or first time)
-              console.warn("Usuário autenticado mas não encontrado no banco de dados.");
-            }
-          } catch (err) {
-            console.error("Erro ao sincronizar usuário:", err);
+        // Always sync with RTDB to ensure we have the latest user profile
+        try {
+          const syncedUser = await storage.getUserFromRTDB(fbUser.uid);
+          if (syncedUser) {
+            storage.setCurrentUser(syncedUser);
+            setUser(syncedUser);
+          } else {
+            // User exists in Auth but not in RTDB (maybe deleted or first time)
+            console.warn("Usuário autenticado mas não encontrado no banco de dados.");
+            storage.setCurrentUser(null);
+            setUser(null);
           }
-        }
-      } else {
-        // If Firebase says no user, clear local user
-        // BUT keep it if it's the master bypass user
-        if (currentUser && currentUser.accessToken !== 'MASTER_ACCESS') {
+        } catch (err) {
+          console.error("Erro ao sincronizar usuário:", err);
           storage.setCurrentUser(null);
           setUser(null);
         }
+      } else {
+        // If Firebase says no user, clear local user
+        storage.setCurrentUser(null);
+        setUser(null);
       }
       setLoading(false);
     });
 
-    // Listen for storage changes (for multi-tab support)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'bordado_magico_current_user_id' || e.key === null) {
-        const currentUser = storage.getCurrentUser();
-        setUser(currentUser);
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    
     return () => {
       unsubscribe();
-      window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 
@@ -95,12 +80,13 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-pink-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-pink-50 gap-4">
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
           className="w-16 h-16 border-4 border-pink-500 border-t-transparent rounded-full"
         />
+        <p className="text-pink-600 font-bold animate-pulse">Carregando...</p>
       </div>
     );
   }

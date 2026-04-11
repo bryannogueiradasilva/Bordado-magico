@@ -222,32 +222,33 @@ export const storage = {
     }
   },
 
+  async deleteUserFromRTDB(userId: string) {
+    try {
+      await set(ref(db, `users/${userId}`), null);
+    } catch (error) {
+      console.error('Error deleting user from RTDB:', error);
+      throw error;
+    }
+  },
+
+  subscribeToUsers(callback: (users: User[]) => void) {
+    const usersRef = ref(db, 'users');
+    return onValue(usersRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        const users = Object.values(data);
+        callback(users as User[]);
+      } else {
+        callback([]);
+      }
+    }, (error) => {
+      console.error('Error subscribing to users:', error);
+      callback(storage.getUsers());
+    });
+  },
+
   // Products RTDB Methods
   async syncProductsToRTDB(products: Product[]) {
-    // Try automatic login for master user if not authenticated
-    if (!auth.currentUser) {
-      const currentUser = storage.getCurrentUser();
-      if (currentUser?.accessToken === 'MASTER_ACCESS' && currentUser.email === 'bryannogueira07@gmail.com') {
-        try {
-          const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth');
-          try {
-            await signInWithEmailAndPassword(auth, 'bryannogueira07@gmail.com', 'admin123');
-            console.log('Automatic master login successful for sync.');
-          } catch (loginErr: any) {
-            if (loginErr.code === 'auth/user-not-found') {
-              console.log('Master account not found in Firebase. Creating it automatically...');
-              await createUserWithEmailAndPassword(auth, 'bryannogueira07@gmail.com', 'admin123');
-              console.log('Automatic master registration successful for sync.');
-            } else {
-              throw loginErr;
-            }
-          }
-        } catch (e) {
-          console.warn('Automatic master login/registration failed for sync:', e);
-        }
-      }
-    }
-
     if (!auth.currentUser) {
       const error = new Error('Tentativa de sincronização sem usuário autenticado pelo Firebase.');
       console.error(error.message);
@@ -272,25 +273,6 @@ export const storage = {
   },
 
   async getProductsFromRTDB(): Promise<Product[]> {
-    // Try automatic login for master user if not authenticated
-    if (!auth.currentUser) {
-      const currentUser = storage.getCurrentUser();
-      if (currentUser?.accessToken === 'MASTER_ACCESS' && currentUser.email === 'bryannogueira07@gmail.com') {
-        try {
-          const { signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth');
-          try {
-            await signInWithEmailAndPassword(auth, 'bryannogueira07@gmail.com', 'admin123');
-          } catch (loginErr: any) {
-            if (loginErr.code === 'auth/user-not-found') {
-              await createUserWithEmailAndPassword(auth, 'bryannogueira07@gmail.com', 'admin123');
-            }
-          }
-        } catch (e) {
-          // Ignore
-        }
-      }
-    }
-
     try {
       const snapshot = await get(child(ref(db), 'products'));
       if (snapshot.exists()) {
@@ -305,18 +287,6 @@ export const storage = {
   },
 
   subscribeToProducts(callback: (products: Product[]) => void) {
-    // Try automatic login for master user in background if not authenticated
-    if (!auth.currentUser) {
-      const currentUser = storage.getCurrentUser();
-      if (currentUser?.accessToken === 'MASTER_ACCESS' && currentUser.email === 'bryannogueira07@gmail.com') {
-        import('firebase/auth').then(({ signInWithEmailAndPassword }) => {
-          signInWithEmailAndPassword(auth, 'bryannogueira07@gmail.com', 'admin123')
-            .then(() => console.log('Background master login successful for subscription.'))
-            .catch(e => console.warn('Background master login failed for subscription:', e));
-        });
-      }
-    }
-
     const productsRef = ref(db, 'products');
     return onValue(productsRef, (snapshot) => {
       if (snapshot.exists()) {

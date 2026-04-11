@@ -7,7 +7,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 // Initialize Firebase
 const app = initializeApp({
   ...firebaseConfig,
-  databaseURL: `https://${firebaseConfig.projectId}-default-rtdb.firebaseio.com/`
+  databaseURL: firebaseConfig.databaseURL || `https://${firebaseConfig.projectId}-default-rtdb.firebaseio.com/`
 });
 
 // Export services

@@ -28,15 +28,27 @@ async function startServer() {
     const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     if (credentialsJson) {
       try {
-        if (credentialsJson.trim().startsWith('{')) {
-          return JSON.parse(credentialsJson);
+        let parsed;
+        const trimmed = credentialsJson.trim();
+        if (trimmed.startsWith('{')) {
+          parsed = JSON.parse(trimmed);
+        } else {
+          // Caso esteja envolto em aspas simples ou duplas devido ao .env
+          const cleaned = trimmed.replace(/^['"]|['"]$/g, '');
+          if (cleaned.startsWith('{')) {
+            parsed = JSON.parse(cleaned);
+          }
         }
+
+        if (parsed && parsed.private_key) {
+          // Garantir que as quebras de linha na chave privada sejam tratadas corretamente
+          parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+        }
+        return parsed;
       } catch (e) {
         console.error("Erro ao processar GOOGLE_APPLICATION_CREDENTIALS_JSON:", e);
       }
     }
-    // Se não houver JSON, o SDK usará automaticamente GOOGLE_APPLICATION_CREDENTIALS (caminho do arquivo)
-    // ou as credenciais padrão do ambiente (Cloud Run).
     return null;
   }
 
@@ -70,13 +82,28 @@ async function startServer() {
 
         if (credentials) {
           options.credential = admin.credential.cert(credentials);
+          console.log(`[Firebase Admin] Inicializando com projeto: ${credentials.project_id}, Email: ${credentials.client_email}, Key ID: ${credentials.private_key_id || 'N/A'}`);
+        } else {
+          console.log("[Firebase Admin] Inicializando com credenciais padrão (ADC).");
         }
-        // Se não houver credentials, o admin.initializeApp() tentará usar o Application Default Credentials
 
-        firebaseAdmin = admin.initializeApp(options, 'admin-app');
-        console.log(`Firebase Admin inicializado com sucesso. DB: ${dbUrl}`);
+        // Tenta usar o app padrão se possível, ou cria um novo
+        try {
+          if (admin.apps.length === 0) {
+            firebaseAdmin = admin.initializeApp(options);
+          } else {
+            const appName = `admin-app-${credentials?.project_id || 'default'}`;
+            firebaseAdmin = admin.apps.find(app => app.name === appName) || admin.initializeApp(options, appName);
+          }
+          console.log(`[Firebase Admin] App inicializado: ${firebaseAdmin.name}`);
+        } catch (initError: any) {
+          console.error("[Firebase Admin] Erro ao inicializar app:", initError);
+          throw initError;
+        }
+        
+        console.log(`[Firebase Admin] Sucesso. DB: ${dbUrl}`);
       } catch (e: any) {
-        console.error("Falha ao inicializar Firebase Admin:", e.message);
+        console.error("[Firebase Admin] Erro fatal na inicialização:", e.message);
         return null;
       }
     }
@@ -103,6 +130,36 @@ async function startServer() {
 
   // API Routes
   // User Management (Admin)
+  app.get("/api/admin/check-permissions", async (req, res) => {
+    const adminApp = getFirebaseAdmin();
+    if (!adminApp) return res.status(500).json({ error: "Firebase Admin not configured" });
+
+    try {
+      // Tenta uma operação simples que requer permissões de admin
+      await adminApp.auth().listUsers(1);
+      res.json({ success: true, message: "Permissões configuradas corretamente!" });
+    } catch (error: any) {
+      console.error("Permission Check Error:", error);
+      
+      let warning = null;
+      const credentials = getCredentials();
+      const projectId = credentials?.project_id || "desconhecido";
+      const email = credentials?.client_email || "da conta de serviço do Cloud Run";
+
+      if (error.code === 'auth/insufficient-permission' || error.message?.includes('insufficient permission')) {
+        warning = `ERRO DE PERMISSÃO: A conta de serviço '${email}' não tem permissão para gerenciar usuários no projeto '${projectId}'.`;
+      }
+
+      res.status(403).json({ 
+        success: false, 
+        error: error.message,
+        warning,
+        email,
+        projectId
+      });
+    }
+  });
+
   app.get("/api/admin/users", async (req, res) => {
     const adminApp = getFirebaseAdmin();
     if (!adminApp) return res.status(500).json({ error: "Firebase Admin not configured" });
@@ -112,11 +169,30 @@ async function startServer() {
       res.json({ users: listUsersResult.users });
     } catch (error: any) {
       console.error("List Users Error:", error);
-      // If Identity Toolkit API is disabled or other auth errors, return empty list with warning
+      
+      let warning = null;
+      const credentials = getCredentials();
+      const projectId = credentials?.project_id || "desconhecido";
+
       if (error.code === 'auth/internal-error' || error.message?.includes('Identity Toolkit API')) {
+        warning = `A 'Identity Toolkit API' está desativada no projeto '${projectId}'. Ative-a no Google Cloud Console para gerenciar usuários.`;
+      } else if (error.code === 'auth/insufficient-permission' || error.message?.includes('insufficient permission')) {
+        const email = credentials?.client_email || "da conta de serviço do Cloud Run";
+        warning = `ERRO DE PERMISSÃO: A conta de serviço '${email}' não tem permissão para gerenciar usuários no projeto '${projectId}'. 
+
+Para resolver:
+1. Vá para o Console do Google Cloud (IAM & Admin).
+2. Localize a conta: ${email}
+3. Clique no ícone de lápis (Editar).
+4. Clique em 'Adicionar outro papel'.
+5. Selecione 'Administrador de Autenticação do Firebase' (Firebase Authentication Admin).
+6. Salve e aguarde 1-2 minutos.`;
+      }
+
+      if (warning) {
         return res.json({ 
           users: [], 
-          warning: "Identity Toolkit API is disabled in Google Cloud Console. User management via Firebase Admin is limited.",
+          warning,
           details: error.message
         });
       }
@@ -154,7 +230,28 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       console.error("Delete User Error:", error);
-      res.status(500).json({ error: error.message });
+      
+      let warning = null;
+      const credentials = getCredentials();
+      const projectId = credentials?.project_id || "desconhecido";
+
+      if (error.code === 'auth/insufficient-permission' || error.message?.includes('insufficient permission')) {
+        const email = credentials?.client_email || "da conta de serviço do Cloud Run";
+        warning = `ERRO DE PERMISSÃO: A conta de serviço '${email}' não tem permissão para excluir usuários no projeto '${projectId}'. 
+
+Para resolver:
+1. Vá para o Console do Google Cloud (IAM & Admin).
+2. Localize a conta: ${email}
+3. Clique no ícone de lápis (Editar).
+4. Clique em 'Adicionar outro papel'.
+5. Selecione 'Administrador de Autenticação do Firebase' (Firebase Authentication Admin).
+6. Salve e aguarde 1-2 minutos.`;
+      }
+
+      res.status(500).json({ 
+        error: error.message,
+        warning
+      });
     }
   });
 

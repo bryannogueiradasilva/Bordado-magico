@@ -10,6 +10,7 @@ export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'products' | 'users'>('products');
   const [users, setUsers] = useState<any[]>([]);
+  const [apiWarning, setApiWarning] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [userFormData, setUserFormData] = useState<{
     name: string;
@@ -54,24 +55,36 @@ export default function ManagerDashboard() {
 
   useEffect(() => {
     // Subscribe to real-time products from RTDB
-    const unsubscribe = storage.subscribeToProducts((rtdbProducts) => {
+    const unsubscribeProducts = storage.subscribeToProducts((rtdbProducts) => {
       if (rtdbProducts && rtdbProducts.length > 0) {
         setProducts(rtdbProducts);
-        // Only save to local storage if we actually got data from RTDB
         storage.saveProducts(rtdbProducts);
       } else {
-        // If RTDB is empty, load from local storage
         const localProducts = storage.getProducts();
         setProducts(localProducts);
       }
       setLoading(false);
     });
 
+    let unsubscribeUsers: (() => void) | undefined;
+
     if (activeTab === 'users') {
+      setLoading(true);
+      
+      // Subscribe to RTDB users for real-time updates
+      unsubscribeUsers = storage.subscribeToUsers((rtdbUsers) => {
+        setUsers(rtdbUsers);
+        setLoading(false);
+      });
+
+      // Also fetch from Auth to ensure RTDB is up to date
       fetchUsers();
     }
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeProducts();
+      if (unsubscribeUsers) unsubscribeUsers();
+    };
   }, [activeTab]);
 
   const fetchUsers = async () => {
@@ -79,27 +92,42 @@ export default function ManagerDashboard() {
       const response = await fetch('/api/admin/users');
       const data = await response.json();
       
-      const localUsers = storage.getUsers();
-      
       if (data.users && data.users.length > 0) {
-        // Merge with local storage data (active status, whatsapp, etc)
-        const mergedUsers = data.users.map((fbUser: any) => {
-          const localUser = localUsers.find(u => u.email.toLowerCase() === fbUser.email.toLowerCase());
-          return {
-            ...fbUser,
-            ...localUser,
-            id: fbUser.uid // Use Firebase UID as primary ID
-          };
-        });
-        setUsers(mergedUsers);
-      } else {
-        // Fallback to local users if API returns empty or warning
-        console.warn("Using local storage users as fallback:", data.warning || "No users returned from API");
-        setUsers(localUsers);
+        setApiWarning(null);
+        const authUids = new Set(data.users.map((u: any) => u.uid));
+        
+        // 1. Sync missing Auth users to RTDB
+        for (const fbUser of data.users) {
+          const existing = await storage.getUserFromRTDB(fbUser.uid);
+          if (!existing) {
+            const newUser: any = {
+              id: fbUser.uid,
+              name: fbUser.displayName || 'Sem Nome',
+              email: fbUser.email,
+              whatsapp: '',
+              role: fbUser.email === 'bryannogueira07@gmail.com' ? 'manager' : 'client',
+              active: true,
+              status: 'active',
+              createdAt: fbUser.metadata?.creationTime || new Date().toISOString()
+            };
+            await storage.syncUserToRTDB(newUser);
+          }
+        }
+
+        // 2. Remove users from RTDB that are no longer in Auth
+        // (Only if we successfully got a full list from Auth)
+        const currentRtdbUsers = storage.getUsers(); // This might be stale, better use the 'users' state
+        for (const rUser of users) {
+          if (!authUids.has(rUser.id) && rUser.role !== 'manager') {
+            console.log(`User ${rUser.email} not found in Auth, removing from RTDB...`);
+            await storage.deleteUserFromRTDB(rUser.id);
+          }
+        }
+      } else if (data.warning) {
+        setApiWarning(data.warning);
       }
     } catch (error) {
-      console.error("Error fetching users, falling back to local storage:", error);
-      setUsers(storage.getUsers());
+      console.error("Error fetching users from Auth:", error);
     }
   };
 
@@ -117,6 +145,17 @@ export default function ManagerDashboard() {
       });
 
       if (!response.ok) throw new Error('Failed to update user in Firebase');
+
+      // Update Realtime Database
+      const updatedUser: any = {
+        id: uid,
+        name: userFormData.name,
+        email: userFormData.email,
+        whatsapp: userFormData.whatsapp,
+        active: userFormData.active,
+        status: (userFormData.active ? 'active' : 'inactive') as 'active' | 'inactive'
+      };
+      await storage.syncUserToRTDB(updatedUser);
 
       // Update local storage
       const localUsers = storage.getUsers();
@@ -146,21 +185,104 @@ export default function ManagerDashboard() {
   };
 
   const handleDeleteUser = async (uid: string) => {
-    if (!confirm("Tem certeza que deseja excluir este cliente? Esta ação não pode ser desfeita.")) return;
+    const userToDelete = users.find(u => u.id === uid);
+    if (userToDelete?.email === 'bryannogueira07@gmail.com') {
+      alert("O administrador principal não pode ser excluído.");
+      return;
+    }
+    setDeletingId(uid);
+  };
+
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const handleDeleteAllClients = async () => {
+    const clientsToDelete = users.filter(u => u.role !== 'manager' && u.email !== 'bryannogueira07@gmail.com');
+    
+    if (clientsToDelete.length === 0) {
+      alert("Não há clientes para excluir.");
+      return;
+    }
+
+    if (!confirm(`Deseja excluir TODOS os ${clientsToDelete.length} clientes? Esta ação não pode ser desfeita.`)) {
+      return;
+    }
+
+    setIsDeletingAll(true);
+    setLoading(true);
+
+    try {
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const client of clientsToDelete) {
+        try {
+          // 1. Auth Delete
+          const response = await fetch(`/api/admin/users/${client.id}`, { method: 'DELETE' });
+          const data = await response.json();
+          
+          if (response.ok) {
+            // 2. RTDB Delete
+            await storage.deleteUserFromRTDB(client.id);
+            successCount++;
+          } else {
+            console.error(`Failed to delete ${client.email}:`, data.error);
+            failCount++;
+          }
+        } catch (err) {
+          console.error(`Error deleting ${client.email}:`, err);
+          failCount++;
+        }
+      }
+
+      // 3. Update local storage
+      const remainingUsers = storage.getUsers().filter(u => 
+        u.role === 'manager' || u.email === 'bryannogueira07@gmail.com'
+      );
+      storage.saveUsers(remainingUsers);
+      
+      alert(`Limpeza concluída!\nSucesso: ${successCount}\nFalhas: ${failCount}`);
+      fetchUsers();
+    } catch (error) {
+      console.error("Bulk delete error:", error);
+      alert("Erro durante a exclusão em massa.");
+    } finally {
+      setIsDeletingAll(false);
+      setLoading(false);
+    }
+  };
+
+  const confirmDeleteUser = async (uid: string) => {
+    const userToDelete = users.find(u => u.id === uid);
+    if (userToDelete?.email === 'bryannogueira07@gmail.com') {
+      alert("O administrador principal não pode ser excluído.");
+      setDeletingId(null);
+      return;
+    }
 
     try {
       setLoading(true);
+      
+      // 1. Delete from Firebase Auth via API
       const response = await fetch(`/api/admin/users/${uid}`, {
         method: 'DELETE'
       });
+      const data = await response.json();
 
-      if (!response.ok) throw new Error('Failed to delete user from Firebase');
+      if (!response.ok && data.warning) {
+        alert(data.warning);
+        setDeletingId(null);
+        return;
+      }
 
-      // Update local storage
+      // 2. Delete from Realtime Database
+      await storage.deleteUserFromRTDB(uid);
+
+      // 3. Update local storage
       const localUsers = storage.getUsers();
       const updatedLocalUsers = localUsers.filter(u => u.id !== uid);
       storage.saveUsers(updatedLocalUsers);
       
+      setDeletingId(null);
       fetchUsers();
     } catch (error) {
       console.error("Error deleting user:", error);
@@ -727,6 +849,71 @@ export default function ManagerDashboard() {
         </div>
       )}
 
+      {/* API Configuration Warning */}
+      {apiWarning && activeTab === 'users' && (
+        <div className="bg-red-50 border-2 border-red-200 p-8 rounded-[40px] shadow-xl mb-8">
+          <div className="flex flex-col md:flex-row items-start gap-6">
+            <div className="bg-red-100 p-4 rounded-3xl text-red-600 shrink-0">
+              <AlertTriangle size={40} />
+            </div>
+            <div className="flex-1 space-y-4">
+              <div>
+                <h3 className="text-2xl font-black text-red-800 mb-2">Acesso Negado ao Firebase Auth</h3>
+                <p className="text-red-700 font-bold leading-relaxed whitespace-pre-wrap">
+                  {apiWarning}
+                </p>
+              </div>
+              
+              <div className="bg-white/50 p-6 rounded-3xl border border-red-100 space-y-3">
+                <h4 className="font-black text-red-900 uppercase tracking-wider text-sm">Passo a Passo para Corrigir:</h4>
+                <ol className="list-decimal list-inside text-red-800 text-sm font-bold space-y-2">
+                  <li>Clique no botão <span className="text-red-600">"Abrir Console IAM"</span> abaixo.</li>
+                  <li>Procure a conta de serviço mencionada no erro acima.</li>
+                  <li>Clique no ícone de <span className="text-red-600">Lápis (Editar)</span>.</li>
+                  <li>Clique em <span className="text-red-600">"Adicionar outro papel"</span>.</li>
+                  <li>Busque por <span className="font-black">"Administrador de Autenticação do Firebase"</span> e selecione.</li>
+                  <li>Clique em <span className="text-red-600">Salvar</span> e aguarde 1 minuto.</li>
+                </ol>
+              </div>
+
+              <div className="flex flex-wrap gap-4">
+                <button 
+                  onClick={() => window.open(`https://console.cloud.google.com/iam-admin/iam?project=bordado-aff87`, '_blank')}
+                  className="bg-red-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-red-700 transition-all shadow-lg shadow-red-200 active:scale-95 flex items-center gap-2"
+                >
+                  <Users size={20} />
+                  Abrir Console IAM
+                </button>
+                <button 
+                  onClick={async () => {
+                    setLoading(true);
+                    try {
+                      const res = await fetch('/api/admin/check-permissions');
+                      const data = await res.json();
+                      if (data.success) {
+                        alert("Sucesso! As permissões foram configuradas corretamente.");
+                        setApiWarning(null);
+                        fetchUsers();
+                      } else {
+                        alert("Ainda sem permissão. Verifique se você salvou as alterações no Google Cloud.");
+                      }
+                    } catch (e) {
+                      alert("Erro ao verificar. Tente novamente.");
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="bg-white text-red-600 border-2 border-red-200 px-8 py-4 rounded-2xl font-black hover:bg-red-50 transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+                  Verificar Agora
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header Section */}
       <div className="flex flex-col items-center text-center bg-white p-10 rounded-3xl shadow-xl border border-gray-100">
         <h1 className="text-4xl font-black text-gray-800 mb-2">Painel do Gerente</h1>
@@ -841,12 +1028,23 @@ export default function ManagerDashboard() {
       ) : (
         <>
           {/* Users List Section */}
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Seus Clientes</h2>
-            <div className="flex items-center gap-2 text-sm font-bold text-gray-400">
-              <Users size={16} />
-              <span>{filteredUsers.length} clientes encontrados</span>
+          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="flex flex-col">
+              <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Seus Clientes</h2>
+              <div className="flex items-center gap-2 text-sm font-bold text-gray-400">
+                <Users size={16} />
+                <span>{filteredUsers.length} clientes encontrados</span>
+              </div>
             </div>
+            
+            <button
+              onClick={handleDeleteAllClients}
+              disabled={loading || isDeletingAll}
+              className="w-full md:w-auto bg-red-50 text-red-600 px-6 py-3 rounded-2xl font-black text-sm hover:bg-red-100 transition-all flex items-center justify-center gap-2 shadow-sm border border-red-100 disabled:opacity-50"
+            >
+              <Trash2 size={18} />
+              Apagar Todos os Clientes
+            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1325,9 +1523,13 @@ export default function ManagerDashboard() {
               <div className="w-24 h-24 bg-red-50 rounded-[32px] flex items-center justify-center mx-auto mb-8 shadow-inner">
                 <Trash2 size={48} className="text-red-500" />
               </div>
-              <h2 className="text-3xl font-black text-gray-800 mb-3 tracking-tight">Excluir Matriz?</h2>
+              <h2 className="text-3xl font-black text-gray-800 mb-3 tracking-tight">
+                {activeTab === 'products' ? 'Excluir Matriz?' : 'Excluir Cliente?'}
+              </h2>
               <p className="text-gray-500 font-bold leading-relaxed mb-10 px-4">
-                Esta ação removerá permanentemente a matriz do catálogo. Deseja continuar?
+                {activeTab === 'products' 
+                  ? 'Esta ação removerá permanentemente a matriz do catálogo e do Firebase. Deseja continuar?'
+                  : 'Esta ação removerá permanentemente o cliente do sistema e do Firebase. Deseja continuar?'}
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
                 <button
@@ -1337,7 +1539,7 @@ export default function ManagerDashboard() {
                   Cancelar
                 </button>
                 <button
-                  onClick={() => handleDelete(deletingId)}
+                  onClick={() => activeTab === 'products' ? handleDelete(deletingId) : confirmDeleteUser(deletingId)}
                   className="flex-1 px-8 py-4 rounded-2xl font-black bg-red-600 text-white hover:bg-red-700 transition-all shadow-lg shadow-red-100 active:scale-95 uppercase tracking-widest text-sm"
                 >
                   Confirmar
