@@ -1,5 +1,5 @@
 # Build stage
-FROM node:18 as build
+FROM node:18-bullseye as build
 
 WORKDIR /app
 COPY . .
@@ -8,7 +8,7 @@ RUN npm install
 RUN npm run build
 
 # Production stage
-FROM node:18
+FROM node:18-bullseye
 
 WORKDIR /app
 
