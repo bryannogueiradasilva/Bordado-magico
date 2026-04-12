@@ -136,10 +136,12 @@ async function startServer() {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    // 👇 SERVIR O BUILD DO REACT
+    app.use(express.static(path.join(__dirname, 'dist')))
+
     app.get('*', (req, res) => {
-      res.sendFile(path.resolve('dist/index.html'));
-    });
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+    })
   }
 
   // A LINHA QUE MATA O ERRO:
