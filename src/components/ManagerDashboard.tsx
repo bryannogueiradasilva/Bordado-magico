@@ -93,7 +93,7 @@ export default function ManagerDashboard() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch('/api/admin/users');
+      const response = await fetch(window.location.origin + '/api/admin/users');
       const data = await response.json();
       
       if (data.users && data.users.length > 0) {
@@ -300,7 +300,7 @@ export default function ManagerDashboard() {
   const [configured, setConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
-  fetch('/api/gcs-status')
+  fetch(window.location.origin + '/api/gcs-status')
     .then(res => res.json())
     .then(data => {
       console.log('STATUS API:', data); // 🔥 IMPORTANTE
@@ -316,13 +316,13 @@ export default function ManagerDashboard() {
 
   const syncWithGCS = async () => {
     try {
-      const res = await fetch('/api/list-embroidery');
+      const res = await fetch(window.location.origin + '/api/list-embroidery');
       const { files } = await res.json();
       
       if (!files) return;
 
       const allProducts = storage.getProducts();
-      const gcsStatusRes = await fetch('/api/gcs-status');
+      const gcsStatusRes = await fetch(window.location.origin + '/api/gcs-status');
       const gcsStatusData = await gcsStatusRes.json();
       const bucket = gcsStatusData.bucket || 'appbordados';
 
@@ -391,7 +391,7 @@ export default function ManagerDashboard() {
     formData.append('file', file);
 
     try {
-      const response = await fetch('/api/upload-embroidery', {
+      const response = await fetch(window.location.origin + '/api/upload-embroidery', {
         method: 'POST',
         body: formData,
       });
@@ -707,7 +707,7 @@ export default function ManagerDashboard() {
     // 1. Delete from GCS if it has a gcsPath
     if (productToDelete?.gcsPath) {
       try {
-        await fetch('/api/delete-embroidery', {
+        await fetch(window.location.origin + '/api/delete-embroidery', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gcsPath: productToDelete.gcsPath })
@@ -931,7 +931,7 @@ export default function ManagerDashboard() {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      const res = await fetch('/api/admin/check-permissions');
+                      const res = await fetch(window.location.origin + '/api/admin/check-permissions');
                       const data = await res.json();
                       if (data.success) {
                         alert("Sucesso! As permissões foram configuradas corretamente.");
