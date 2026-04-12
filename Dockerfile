@@ -1,25 +1,22 @@
-FROM node:22-slim
+# Build stage
+FROM node:18 as build
+
+WORKDIR /app
+COPY . .
+
+RUN npm install
+RUN npm run build
+
+# Production stage
+FROM node:18
 
 WORKDIR /app
 
-# Accept build args for Vite
-ARG VITE_FIREBASE_DATABASE_URL
-ARG VITE_FIREBASE_PROJECT_ID
-ENV VITE_FIREBASE_DATABASE_URL=$VITE_FIREBASE_DATABASE_URL
-ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
+COPY --from=build /app .
 
-# Install dependencies
-COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
-# Copy source code
-COPY . .
+ENV PORT=8080
+EXPOSE 8080
 
-# Build the frontend
-RUN npm run build
-
-# Expose the port
-EXPOSE 3000
-
-# Start the server
-CMD ["npm", "start"]
+CMD ["node", "server.ts"]
