@@ -70,7 +70,6 @@ const gcs = getStorage();
 const { gcsPath } = req.body;
 if (!gcsPath) return res.status(400).json({ error: "gcsPath is required" });
 
-```
   const bucketObj = gcs.bucket(bucket);
 
   await bucketObj.file(gcsPath).delete({ ignoreNotFound: true });
@@ -83,7 +82,6 @@ if (!gcsPath) return res.status(400).json({ error: "gcsPath is required" });
 } catch (error: any) {
   res.status(500).json({ error: error.message });
 }
-```
 
 });
 
@@ -110,7 +108,6 @@ res.status(500).json({ error: error.message });
 app.post("/api/upload-embroidery", upload.single("file"), async (req, res) => {
 if (!req.file) return res.status(400).send("Sem arquivo");
 
-```
 try {
   const gcs = getStorage();
   const fileName = `arquivos-matrizes/${Date.now()}-${req.file.originalname}`;
@@ -134,18 +131,22 @@ try {
 } catch (error: any) {
   res.status(500).json({ error: error.message });
 }
-```
 
 });
 
-// 🔥 PRODUÇÃO (SEM VITE)
-const distPath = path.join(__dirname, "dist");
-
-app.use(express.static(distPath));
-
-app.get("*", (req, res) => {
-res.sendFile(path.join(distPath, "index.html"));
-});
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
 
 app.listen(PORT, () => {
 console.log(`Servidor rodando na porta ${PORT}`);

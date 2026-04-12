@@ -1,26 +1,27 @@
-FROM node:18-bullseye
+FROM node:22-slim
 
 WORKDIR /app
 
-# instala dependências
+# Accept build args for Vite
+ARG VITE_FIREBASE_DATABASE_URL
+ARG VITE_FIREBASE_PROJECT_ID
+ENV VITE_FIREBASE_DATABASE_URL=$VITE_FIREBASE_DATABASE_URL
+ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
 
+# Install dependencies
 COPY package*.json ./
 RUN npm install
 
-# copia tudo
-
+# Copy source code
 COPY . .
 
-# 🔥 builda o frontend
-
+# Build the frontend
 RUN npm run build
 
-# 🔥 força modo produção
-
+ENV PORT=8080
 ENV NODE_ENV=production
-
+# Expose the port
 EXPOSE 8080
 
-# 🔥 roda o server
-
-CMD ["node", "server.ts"]
+# Start the server
+CMD ["npm", "start"]
