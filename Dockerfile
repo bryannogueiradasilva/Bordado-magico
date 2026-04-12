@@ -2,9 +2,16 @@
 FROM node:18-bullseye as build
 
 WORKDIR /app
+COPY package*.json ./
+
+# 👇 força instalação limpa correta
+RUN npm install --legacy-peer-deps
+
 COPY . .
 
-RUN npm install
+# 👇 resolve bug do esbuild
+RUN npm rebuild esbuild
+
 RUN npm run build
 
 # Production stage
