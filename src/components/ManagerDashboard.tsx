@@ -6,6 +6,10 @@ import { analyzeEmbroideryImage, analyzeEmbroideryFilename, generateEmbroideryPr
 import { cn } from '../lib/utils';
 
 export default function ManagerDashboard() {
+  const generateId = () => {
+    return 'prod_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  };
+
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'products' | 'users'>('products');
@@ -324,18 +328,64 @@ export default function ManagerDashboard() {
       if (!files) return;
 
       const allProducts = storage.getProducts();
-      // Filter out products that have a gcsPath but the file is no longer in GCS
-      const updatedProducts = allProducts.filter(p => {
-        // If it doesn't have a gcsPath, it might be a local/legacy product, keep it
+      const gcsStatusRes = await fetch('/api/gcs-status');
+      const gcsStatusData = await gcsStatusRes.json();
+      const bucket = gcsStatusData.bucket || 'appbordados';
+
+      // 1. Filter out products that have a gcsPath but the file is no longer in GCS
+      let updatedProducts = allProducts.filter(p => {
         if (!p.gcsPath) return true;
-        // If it has a gcsPath, check if it exists in the GCS list
         return files.includes(p.gcsPath);
       });
 
-      if (updatedProducts.length !== allProducts.length) {
-        console.log(`Sync: Removed ${allProducts.length - updatedProducts.length} products not found in GCS.`);
+      // 2. Add products that are in GCS but not in the database
+      const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
+      const missingFiles = files.filter((f: string) => !existingGcsPaths.has(f));
+
+      if (missingFiles.length > 0) {
+        console.log(`Sync: Found ${missingFiles.length} new files in GCS. Adding to catalog...`);
+        
+        for (const file of missingFiles) {
+          const fileName = file.split('/').pop() || file;
+          const baseName = fileName.split('.').shift() || fileName;
+          
+          // AI Analysis of filename for better metadata
+          let analysis = null;
+          try {
+            analysis = await analyzeEmbroideryFilename(fileName) as any;
+          } catch (e) {
+            console.warn("AI analysis failed for synced file:", fileName);
+          }
+
+          const newProduct: Product = {
+            id: generateId(),
+            name: analysis?.name || baseName,
+            description: analysis?.description || `Matriz de bordado sincronizada: ${fileName}`,
+            price: 19.90,
+            imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${baseName}.png`,
+            fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
+            fileName: fileName,
+            gcsPath: file,
+            category: analysis?.category || 'Sincronizado',
+            createdAt: new Date().toISOString(),
+            soldCount: 0,
+            reviews: []
+          };
+          updatedProducts.push(newProduct);
+        }
+      }
+
+      if (updatedProducts.length !== allProducts.length || missingFiles.length > 0) {
+        console.log(`Sync complete: ${updatedProducts.length} products total.`);
         storage.saveProducts(updatedProducts);
         setProducts(updatedProducts);
+        
+        // Sync to RTDB if possible
+        try {
+          await storage.syncProductsToRTDB(updatedProducts);
+        } catch (e) {
+          console.warn("Could not sync updated list to RTDB during auto-sync:", e);
+        }
       }
     } catch (error) {
       console.error("Sync Error:", error);
@@ -583,10 +633,6 @@ export default function ManagerDashboard() {
     u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.whatsapp?.includes(searchTerm)
   );
-
-  const generateId = () => {
-    return 'prod_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

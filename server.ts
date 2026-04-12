@@ -43,6 +43,51 @@ async function startServer() {
   }
 
   const upload = multer({ storage: multer.memoryStorage() });
+  const bucket = process.env.GCS_BUCKET_NAME || "appbordados";
+
+  // Diagnostic endpoint
+  app.get("/api/gcs-status", (req, res) => {
+    const hasJson = !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+    res.json({
+      configured: hasJson,
+      bucket: bucket
+    });
+  });
+
+  app.get("/api/list-embroidery", async (req, res) => {
+    try {
+      const gcs = getStorage();
+      const [files] = await gcs.bucket(bucket).getFiles({ prefix: "arquivos-matrizes/" });
+      const fileNames = files.map(file => file.name).filter(name => name !== "arquivos-matrizes/");
+      res.json({ files: fileNames });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/delete-embroidery", express.json(), async (req, res) => {
+    try {
+      const gcs = getStorage();
+      const { gcsPath } = req.body;
+      if (!gcsPath) return res.status(400).json({ error: "gcsPath is required" });
+
+      const bucketObj = gcs.bucket(bucket);
+      
+      // Delete the main embroidery file
+      await bucketObj.file(gcsPath).delete({ ignoreNotFound: true });
+      
+      // Also attempt to delete the generated preview image
+      // gcsPath is "arquivos-matrizes/123-file.pes"
+      // preview is "imagens-vitrine/123-file.png"
+      const fileName = path.parse(gcsPath).name;
+      const previewPath = `imagens-vitrine/${fileName}.png`;
+      await bucketObj.file(previewPath).delete({ ignoreNotFound: true });
+
+      res.json({ success: true, message: "Files deleted from GCS" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // --- SUAS ROTAS MANTIDAS ---
   app.get("/api/admin/users", async (req, res) => {
@@ -66,9 +111,23 @@ async function startServer() {
     try {
       const gcs = getStorage();
       const fileName = `arquivos-matrizes/${Date.now()}-${req.file.originalname}`;
-      const blob = gcs.bucket(bucketName).file(fileName);
+      const blob = gcs.bucket(bucket).file(fileName);
       const stream = blob.createWriteStream({ resumable: false, contentType: req.file.mimetype });
-      stream.on("finish", () => res.json({ success: true, gcsPath: fileName }));
+      
+      stream.on("finish", () => {
+        const publicUrl = `https://storage.googleapis.com/${bucket}/${fileName}`;
+        // O preview é gerado pela Cloud Function com o mesmo nome base mas extensão .png
+        const baseName = path.parse(fileName).name;
+        const previewUrl = `https://storage.googleapis.com/${bucket}/imagens-vitrine/${baseName}.png`;
+        
+        res.json({ 
+          success: true, 
+          gcsPath: fileName,
+          publicUrl,
+          previewUrl
+        });
+      });
+      
       stream.end(req.file.buffer);
     } catch (error: any) { res.status(500).json({ error: error.message }); }
   });
