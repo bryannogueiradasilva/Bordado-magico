@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Edit, Save, X, Image as ImageIcon, Tag, DollarSign, FileText, UploadCloud, Loader2, Sparkles, CheckCircle2, AlertTriangle, Flower2, MessageSquare, Star, User, TrendingUp, Search, Filter, Users, Settings, Key, Mail, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, Image as ImageIcon, Tag, DollarSign, FileText, UploadCloud, Loader2, Sparkles, CheckCircle2, AlertTriangle, Flower2, MessageSquare, Star, User, TrendingUp, Search, Filter, Users, Settings, Key, Mail, Eye, EyeOff, RefreshCw, Cloud } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { storage, Product, fileToBase64, compressImage, Review } from '../services/storage';
 import { analyzeEmbroideryImage, analyzeEmbroideryFilename, generateEmbroideryPreview } from '../services/gemini';
@@ -93,7 +93,7 @@ export default function ManagerDashboard() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(window.location.origin + '/api/admin/users');
+      const response = await fetch('/api/admin/users');
       const data = await response.json();
       
       if (data.users && data.users.length > 0) {
@@ -297,32 +297,41 @@ export default function ManagerDashboard() {
   };
 
   const [showUserPassword, setShowUserPassword] = useState(false);
-  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [gcsStatus, setGcsStatus] = useState<any>(null);
 
   useEffect(() => {
-  fetch(window.location.origin + '/api/gcs-status')
-    .then(res => res.json())
-    .then(data => {
-      console.log('STATUS API:', data); // 🔥 IMPORTANTE
-      setConfigured(data.configured);
-    })
-    .catch((err) => {
-      console.error('ERRO API:', err); // 🔥 IMPORTANTE
-      setConfigured(false);
-    });
-}, []);
+    fetch('/api/gcs-status')
+      .then(res => res.json())
+      .then(data => {
+        console.log('STATUS API:', data);
+        setGcsStatus(data);
+        if (data.configured) {
+          syncWithGCS();
+        }
+      })
+      .catch((err) => {
+        console.error('ERRO API:', err);
+        setGcsStatus({ configured: false });
+      });
+  }, []);
 
   const [isTransforming, setIsTransforming] = useState(false);
 
+  const [isGcsSyncing, setIsGcsSyncing] = useState(false);
+
   const syncWithGCS = async () => {
+    setIsGcsSyncing(true);
     try {
-      const res = await fetch(window.location.origin + '/api/list-embroidery');
+      const res = await fetch('/api/list-embroidery');
       const { files } = await res.json();
       
-      if (!files) return;
+      if (!files) {
+        setIsGcsSyncing(false);
+        return;
+      }
 
       const allProducts = storage.getProducts();
-      const gcsStatusRes = await fetch(window.location.origin + '/api/gcs-status');
+      const gcsStatusRes = await fetch('/api/gcs-status');
       const gcsStatusData = await gcsStatusRes.json();
       const bucket = gcsStatusData.bucket || 'appbordados';
 
@@ -381,20 +390,34 @@ export default function ManagerDashboard() {
           console.warn("Could not sync updated list to RTDB during auto-sync:", e);
         }
       }
+      
+      if (missingFiles.length > 0) {
+        alert(`${missingFiles.length} novos arquivos encontrados no GCS e adicionados à vitrine!`);
+      }
     } catch (error) {
       console.error("Sync Error:", error);
+    } finally {
+      setIsGcsSyncing(false);
     }
   };
 
   const uploadToGCS = async (file: File) => {
+    console.log('DEBUG FILE:', file);
     const formData = new FormData();
     formData.append('file', file);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout
+
+    console.log(`📤 Iniciando upload para: /api/upload-embroidery`);
     try {
-      const response = await fetch(window.location.origin + '/api/upload-embroidery', {
+      const response = await fetch('/api/upload-embroidery', {
         method: 'POST',
         body: formData,
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       const contentType = response.headers.get("content-type");
       if (contentType && contentType.indexOf("application/json") !== -1) {
@@ -481,76 +504,84 @@ export default function ManagerDashboard() {
     const baseNames = Object.keys(groupedFiles);
 
     try {
-      for (let i = 0; i < baseNames.length; i++) {
-        const baseName = baseNames[i];
-        const group = groupedFiles[baseName];
+      // Process in chunks of 2 to avoid overwhelming the server/API
+      const chunkSize = 2;
+      for (let i = 0; i < baseNames.length; i += chunkSize) {
+        const chunk = baseNames.slice(i, i + chunkSize);
         
-        if (!group.embroidery && !group.image) continue;
+        await Promise.all(chunk.map(async (baseName) => {
+          const group = groupedFiles[baseName];
+          if (!group.embroidery && !group.image) return;
 
-        setProcessingFiles(prev => prev.map(p => 
-          (p.name === group.image?.name || p.name === group.embroidery?.name) 
-            ? { ...p, status: 'processing' } 
-            : p
-        ));
+          setProcessingFiles(prev => prev.map(p => 
+            (p.name === group.image?.name || p.name === group.embroidery?.name) 
+              ? { ...p, status: 'processing' } 
+              : p
+          ));
 
-        try {
-          let imageUrl = '';
-          let fileUrl = '';
-          let fileName = '';
-          let gcsPath = '';
-          let analysis = null;
+          try {
+            let imageUrl = '';
+            let fileUrl = '';
+            let fileName = '';
+            let gcsPath = '';
+            let analysis = null;
 
-          if (group.embroidery) {
-            // 1. Upload to GCS
-            const uploadResult = await uploadToGCS(group.embroidery);
-            fileUrl = uploadResult.publicUrl;
-            fileName = group.embroidery.name;
-            gcsPath = uploadResult.gcsPath;
+            if (group.embroidery) {
+              // 1. Upload to GCS
+              const uploadResult = await uploadToGCS(group.embroidery);
+              fileUrl = uploadResult.publicUrl;
+              fileName = group.embroidery.name;
+              gcsPath = uploadResult.gcsPath;
 
-            // 2. Wait for Cloud Function processing (3-5 seconds as requested)
-            await new Promise(resolve => setTimeout(resolve, 4000));
+              // 2. Wait for Cloud Function processing (3-5 seconds as requested)
+              // We do this in parallel with AI analysis to save time
+              const waitPromise = new Promise(resolve => setTimeout(resolve, 4000));
+              
+              // 3. AI Analysis of filename
+              const analysisPromise = analyzeEmbroideryFilename(group.embroidery.name);
+              
+              const [_, analysisResult] = await Promise.all([waitPromise, analysisPromise]);
+              analysis = analysisResult as any;
 
-            // 3. Set the preview URL
-            imageUrl = uploadResult.previewUrl;
+              // 4. Set the preview URL
+              imageUrl = uploadResult.previewUrl;
+            } else if (group.image) {
+              const base64 = await fileToBase64(group.image);
+              imageUrl = await compressImage(base64);
+              analysis = await analyzeEmbroideryImage(imageUrl.split(',')[1], group.image.type) as any;
+            }
+
+            const newProduct: Product = {
+              id: generateId(),
+              name: analysis?.name || baseName,
+              description: analysis?.description || `Matriz de bordado ${fileName || baseName}.`,
+              price: 19.90,
+              imageUrl: imageUrl || 'https://picsum.photos/seed/embroidery/800/600',
+              fileUrl: fileUrl,
+              fileName: fileName,
+              gcsPath: gcsPath,
+              category: analysis?.category || 'Geral',
+              createdAt: new Date().toISOString(),
+              soldCount: 0,
+              reviews: []
+            };
+
+            newProducts.push(newProduct);
             
-            // AI Analysis of filename
-            analysis = await analyzeEmbroideryFilename(group.embroidery.name) as any;
-          } else if (group.image) {
-            const base64 = await fileToBase64(group.image);
-            imageUrl = await compressImage(base64);
-            analysis = await analyzeEmbroideryImage(imageUrl.split(',')[1], group.image.type) as any;
+            setProcessingFiles(prev => prev.map(p => 
+              (p.name === group.image?.name || p.name === group.embroidery?.name) 
+                ? { ...p, status: 'done' } 
+                : p
+            ));
+          } catch (err) {
+            console.error(`Erro ao processar ${baseName}:`, err);
+            setProcessingFiles(prev => prev.map(p => 
+              (p.name === group.image?.name || p.name === group.embroidery?.name) 
+                ? { ...p, status: 'error' } 
+                : p
+            ));
           }
-
-          const newProduct: Product = {
-            id: generateId(),
-            name: analysis?.name || baseName,
-            description: analysis?.description || `Matriz de bordado ${fileName || baseName}.`,
-            price: 19.90,
-            imageUrl: imageUrl || 'https://picsum.photos/seed/embroidery/800/600',
-            fileUrl: fileUrl,
-            fileName: fileName,
-            gcsPath: gcsPath, // Store the GCS path for sync/delete
-            category: analysis?.category || 'Geral',
-            createdAt: new Date().toISOString(),
-            soldCount: 0,
-            reviews: []
-          };
-
-          newProducts.push(newProduct);
-          
-          setProcessingFiles(prev => prev.map(p => 
-            (p.name === group.image?.name || p.name === group.embroidery?.name) 
-              ? { ...p, status: 'done' } 
-              : p
-          ));
-        } catch (err) {
-          console.error(`Erro ao processar ${baseName}:`, err);
-          setProcessingFiles(prev => prev.map(p => 
-            (p.name === group.image?.name || p.name === group.embroidery?.name) 
-              ? { ...p, status: 'error' } 
-              : p
-          ));
-        }
+        }));
       }
 
       if (newProducts.length > 0) {
@@ -574,6 +605,66 @@ export default function ManagerDashboard() {
     } finally {
       setIsBulkAdding(false);
     }
+  };
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files ? e.target.files[0] : null;
+
+    console.log("FILE REAL:", file); // 🔥 ESSENCIAL
+
+    if (!file) {
+      console.error("Nenhum arquivo selecionado");
+      return;
+    }
+
+    setLoading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    fetch('https://remix-bordado-m-gico-matrizes-de-bordado-267339025814.us-west1.run.app/api/upload-embroidery', {
+      method: 'POST',
+      body: formData
+    })
+      .then(res => res.json())
+      .then(async (data) => {
+        console.log("UPLOAD OK:", data);
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        const baseName = file.name.split('.').shift() || file.name;
+        const newProduct: Product = {
+          id: generateId(),
+          name: baseName,
+          description: `Matriz carregada via upload simples: ${file.name}`,
+          price: 19.90,
+          imageUrl: data.previewUrl,
+          fileUrl: data.publicUrl,
+          fileName: file.name,
+          gcsPath: data.gcsPath,
+          category: 'Upload Simples',
+          createdAt: new Date().toISOString(),
+          soldCount: 0,
+          reviews: []
+        };
+        
+        const currentProducts = storage.getProducts();
+        const updatedProducts = [...currentProducts, newProduct];
+        storage.saveProducts(updatedProducts);
+        await storage.syncProductsToRTDB(updatedProducts);
+        setProducts(updatedProducts);
+        
+        alert(`✅ Arquivo "${file.name}" enviado e cadastrado!`);
+      })
+      .catch(err => {
+        console.error("ERRO UPLOAD:", err);
+        alert(`❌ Erro: ${err.message}`);
+      })
+      .finally(() => {
+        setLoading(false);
+        if (e.target) e.target.value = '';
+      });
   };
 
   const handleAddReview = (productId: string) => {
@@ -707,7 +798,7 @@ export default function ManagerDashboard() {
     // 1. Delete from GCS if it has a gcsPath
     if (productToDelete?.gcsPath) {
       try {
-        await fetch(window.location.origin + '/api/delete-embroidery', {
+        await fetch('/api/delete-embroidery', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gcsPath: productToDelete.gcsPath })
@@ -865,9 +956,9 @@ export default function ManagerDashboard() {
     }
   };
 
-  if (configured === null) return null;
+  if (gcsStatus === null) return null;
 
-  if (!configured) {
+  if (!gcsStatus.configured) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-pink-50 p-4">
         <div className="bg-white p-8 rounded-3xl shadow-xl border-2 border-pink-100 text-center max-w-md">
@@ -875,9 +966,57 @@ export default function ManagerDashboard() {
             <AlertTriangle size={32} />
           </div>
           <h2 className="text-2xl font-black text-gray-800 mb-2">Google Cloud não configurado</h2>
-          <p className="text-gray-600 font-bold mb-6">
-            O sistema de armazenamento de arquivos não foi detectado. Por favor, configure as credenciais no painel de controle.
-          </p>
+          <div className="text-gray-600 font-bold mb-6 space-y-2">
+            <p>O sistema de armazenamento de arquivos não foi detectado ou as credenciais são inválidas.</p>
+            {gcsStatus.details && (
+              <div className="text-xs bg-gray-50 p-3 rounded-xl border border-gray-100 text-left font-mono">
+                <div>• Variável de Ambiente: {gcsStatus.details.hasEnvVar ? '✅' : '❌'}</div>
+                <div>• JSON Válido: {gcsStatus.details.isJsonValid ? '✅' : '❌'}</div>
+                <div>• Chave Privada: {gcsStatus.details.hasPrivateKey ? '✅' : '❌'}</div>
+                <div>• Formato PEM: {gcsStatus.details.isPemFormat ? '✅' : '❌'}</div>
+                <div>• Linhas na Chave: {gcsStatus.details.lineCount} {gcsStatus.details.lineCount > 10 ? '✅' : '⚠️ (Mínimo 10)'}</div>
+                <div className="mt-2 text-[10px] text-gray-400">Projeto: {gcsStatus.details.projectId}</div>
+                <div className="text-[10px] text-gray-400 truncate">Email: {gcsStatus.details.clientEmail}</div>
+              </div>
+            )}
+            <p className="text-xs text-pink-600 mt-4">
+              <strong>Dica Importante:</strong> Copie o conteúdo <strong>INTEIRO</strong> do arquivo JSON baixado do Google Cloud. 
+              A chave privada deve ter várias linhas. Se o checklist acima mostrar menos de 10 linhas, a chave está incompleta ou mal formatada.
+            </p>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/gcs-status');
+                  const contentType = res.headers.get("content-type");
+                  const text = await res.text();
+                  alert(`Status: ${res.status}\nContent-Type: ${contentType}\n\nResponse: ${text.substring(0, 100)}...`);
+                } catch (e) {
+                  alert("Erro ao chamar API de status: " + e);
+                }
+              }}
+              className="mt-2 w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-bold hover:bg-blue-100 transition-all text-xs"
+            >
+              Verificar Saúde da API
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/gcs-test-sign');
+                  const data = await res.json();
+                  if (data.success) {
+                    alert("✅ Conexão GCS OK!\nBuckets encontrados: " + data.buckets.join(', '));
+                  } else {
+                    alert("❌ Erro na Conexão GCS:\n" + data.error + (data.details ? "\n\nDetalhes: " + data.details : ""));
+                  }
+                } catch (e) {
+                  alert("Erro ao testar conexão. Verifique o console.");
+                }
+              }}
+              className="mt-4 w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200 transition-all text-xs"
+            >
+              Testar Conexão com GCS
+            </button>
+          </div>
           <button 
             onClick={() => window.open('https://console.cloud.google.com/iam-admin/serviceaccounts', '_blank')}
             className="w-full bg-pink-600 text-white py-4 rounded-2xl font-black hover:bg-pink-700 transition-all shadow-lg shadow-pink-100"
@@ -931,7 +1070,7 @@ export default function ManagerDashboard() {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      const res = await fetch(window.location.origin + '/api/admin/check-permissions');
+                      const res = await fetch('/api/admin/check-permissions');
                       const data = await res.json();
                       if (data.success) {
                         alert("Sucesso! As permissões foram configuradas corretamente.");
@@ -963,6 +1102,15 @@ export default function ManagerDashboard() {
         <p className="text-gray-500 mb-8 font-bold">Gerencie seu catálogo de matrizes</p>
         
         <div className="flex flex-wrap justify-center gap-4 mb-8">
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Upload Direto</span>
+            <input 
+              type="file" 
+              onChange={handleUpload} 
+              className="text-xs font-bold text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-xs file:font-black file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 transition-all"
+            />
+          </div>
+
           <input
             type="file"
             multiple
@@ -984,6 +1132,14 @@ export default function ManagerDashboard() {
           >
             <RefreshCw className={cn(isSyncing && "animate-spin")} size={24} />
             {isSyncing ? 'Sincronizando...' : 'Sincronizar Produção'}
+          </button>
+          <button
+            onClick={syncWithGCS}
+            disabled={isGcsSyncing}
+            className="bg-orange-500 text-white px-8 py-4 rounded-2xl font-black hover:bg-orange-600 transition-all shadow-lg shadow-orange-100 flex items-center gap-2 disabled:opacity-50"
+          >
+            <Cloud className={cn(isGcsSyncing && "animate-spin")} size={24} />
+            {isGcsSyncing ? 'Sincronizando GCS...' : 'Sincronizar GCS'}
           </button>
           <button
             onClick={() => { setIsAdding(!isAdding); setEditingId(null); setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' }); }}
