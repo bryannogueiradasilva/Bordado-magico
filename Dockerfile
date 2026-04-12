@@ -18,8 +18,9 @@ COPY . .
 # Build the frontend
 RUN npm run build
 
+ENV PORT=8080
 # Expose the port
-EXPOSE 3000
+EXPOSE 8080
 
 # Start the server
 CMD ["npm", "start"]
