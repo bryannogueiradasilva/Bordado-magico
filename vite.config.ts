@@ -4,43 +4,46 @@ import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '');
+const env = loadEnv(mode, '.', '');
 
-  return {
-    plugins: [
-      react(), 
-      tailwindcss()
-    ],
+return {
+base: '/', // 🔥 CORREÇÃO PRINCIPAL
 
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
+```
+plugins: [
+  react(), 
+  tailwindcss()
+],
 
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
-    },
+define: {
+  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+},
 
-    server: {
-      host: true, // 🔥 todos
-      allowedHosts: [
-        'site-bordado-magico-267339025814.us-central1.run.app',
-        'site-bordado-magico-579156839935.us-central1.run.app',
-        '.run.app' // 🔥 libera TODOS os domínios do Cloud Run
-      ],
-      hmr: process.env.DISABLE_HMR !== 'true',
-    },
+resolve: {
+  alias: {
+    '@': path.resolve(__dirname, '.'),
+  },
+},
 
-    preview: {
-      host: true,
-      port: 8080,
-    },
+server: {
+  host: true,
+  allowedHosts: [
+    '.run.app'
+  ],
+  hmr: process.env.DISABLE_HMR !== 'true',
+},
 
-    build: {
-      outDir: 'dist',
-      sourcemap: false,
-      minify: true,
-    },
-  };
+preview: {
+  host: true,
+  port: 8080,
+},
+
+build: {
+  outDir: 'dist',
+  sourcemap: false,
+  minify: true,
+},
+```
+
+};
 });
