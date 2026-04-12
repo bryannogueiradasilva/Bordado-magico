@@ -297,28 +297,22 @@ export default function ManagerDashboard() {
   };
 
   const [showUserPassword, setShowUserPassword] = useState(false);
-  const [isTransforming, setIsTransforming] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<{ fileName: string; status: string } | null>(null);
-
-  const [gcsStatus, setGcsStatus] = useState<{ configured: boolean; instructions?: string } | null>(null);
+  const [configured, setConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const checkGcs = async () => {
-      try {
-        const res = await fetch('/api/gcs-status');
-        const data = await res.json();
-        setGcsStatus(data);
-        
-        // If GCS is configured, sync products
-        if (data.configured) {
-          syncWithGCS();
-        }
-      } catch (e) {
-        console.error("Failed to check GCS status:", e);
-      }
-    };
-    checkGcs();
-  }, []);
+  fetch('/api/gcs-status')
+    .then(res => res.json())
+    .then(data => {
+      console.log('STATUS API:', data); // 🔥 IMPORTANTE
+      setConfigured(data.configured);
+    })
+    .catch((err) => {
+      console.error('ERRO API:', err); // 🔥 IMPORTANTE
+      setConfigured(false);
+    });
+}, []);
+
+  const [isTransforming, setIsTransforming] = useState(false);
 
   const syncWithGCS = async () => {
     try {
@@ -871,29 +865,32 @@ export default function ManagerDashboard() {
     }
   };
 
-  return (
-    <div className="max-w-6xl mx-auto px-4 space-y-8 pb-20">
-      {/* GCS Configuration Warning */}
-      {gcsStatus && !gcsStatus.configured && (
-        <div className="bg-amber-50 border-2 border-amber-200 p-6 rounded-3xl flex flex-col md:flex-row items-center gap-4 shadow-sm">
-          <div className="bg-amber-100 p-3 rounded-2xl text-amber-600">
+  if (configured === null) return null;
+
+  if (!configured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-pink-50 p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl border-2 border-pink-100 text-center max-w-md">
+          <div className="bg-pink-100 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-pink-600">
             <AlertTriangle size={32} />
           </div>
-          <div className="flex-1 text-center md:text-left">
-            <h3 className="text-lg font-black text-amber-800">Google Cloud não configurado</h3>
-            <p className="text-amber-700 text-sm font-medium">
-              O upload automático para o Storage está desativado. 
-              {gcsStatus.instructions}
-            </p>
-          </div>
+          <h2 className="text-2xl font-black text-gray-800 mb-2">Google Cloud não configurado</h2>
+          <p className="text-gray-600 font-bold mb-6">
+            O sistema de armazenamento de arquivos não foi detectado. Por favor, configure as credenciais no painel de controle.
+          </p>
           <button 
             onClick={() => window.open('https://console.cloud.google.com/iam-admin/serviceaccounts', '_blank')}
-            className="bg-amber-600 text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-amber-700 transition-colors shadow-lg shadow-amber-200"
+            className="w-full bg-pink-600 text-white py-4 rounded-2xl font-black hover:bg-pink-700 transition-all shadow-lg shadow-pink-100"
           >
             Configurar Agora
           </button>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 space-y-8 pb-20">
 
       {/* API Configuration Warning */}
       {apiWarning && activeTab === 'users' && (
