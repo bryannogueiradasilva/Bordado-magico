@@ -72,24 +72,27 @@ export default function ManagerDashboard() {
       setLoading(false);
     });
 
-    let unsubscribeUsers: (() => void) | undefined;
-
-    if (activeTab === 'users') {
-      setLoading(true);
-      
-      // Subscribe to RTDB users for real-time updates
-      unsubscribeUsers = storage.subscribeToUsers((rtdbUsers) => {
-        setUsers(rtdbUsers);
+    // 🔥 Sincronização automática de usuários (RTDB)
+    const unsubscribeUsers = storage.subscribeToUsers((rtdbUsers) => {
+      setUsers(rtdbUsers);
+      if (activeTab === 'users') {
         setLoading(false);
-      });
+      }
+    });
 
-      // Also fetch from Auth to ensure RTDB is up to date
+    // 🔥 Sincronização periódica com Firebase Auth (para garantir consistência)
+    if (activeTab === 'users') {
       fetchUsers();
     }
 
+    const authSyncInterval = setInterval(() => {
+      fetchUsers();
+    }, 30000); // Sincroniza com Auth a cada 30 segundos
+
     return () => {
       unsubscribeProducts();
-      if (unsubscribeUsers) unsubscribeUsers();
+      unsubscribeUsers();
+      clearInterval(authSyncInterval);
     };
   }, [activeTab]);
 
@@ -123,13 +126,17 @@ export default function ManagerDashboard() {
 
         // 2. Remove users from RTDB that are no longer in Auth
         // (Only if we successfully got a full list from Auth)
-        const currentRtdbUsers = storage.getUsers(); // This might be stale, better use the 'users' state
-        for (const rUser of users) {
-          if (!authUids.has(rUser.id) && rUser.role !== 'manager') {
-            console.log(`User ${rUser.email} not found in Auth, removing from RTDB...`);
-            await storage.deleteUserFromRTDB(rUser.id);
+        const currentRtdbUsers = storage.getUsers();
+        // Usamos uma referência estável para os usuários atuais para evitar problemas de closure
+        setUsers(prevUsers => {
+          for (const rUser of prevUsers) {
+            if (!authUids.has(rUser.id) && rUser.role !== 'manager' && rUser.email !== 'bryannogueira07@gmail.com') {
+              console.log(`User ${rUser.email} not found in Auth, removing from RTDB...`);
+              storage.deleteUserFromRTDB(rUser.id);
+            }
           }
-        }
+          return prevUsers;
+        });
       } else if (data.warning) {
         setApiWarning(data.warning);
       }

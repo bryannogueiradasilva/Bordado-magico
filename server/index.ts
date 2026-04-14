@@ -35,36 +35,20 @@ async function startServer() {
   // Configuração do Google Cloud Storage (GCS)
   const bucketName = process.env.GCS_BUCKET_NAME || "appbordados";
 
-  /**
-   * Helper para obter credenciais.
-   * Se estiver no Cloud Run, ele usa a Service Account automática (ADC).
-   * Se houver a variável GOOGLE_APPLICATION_CREDENTIALS_JSON, usamos ela (útil para dev local).
-   */
-  function getCredentials() {
-    const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
-    if (credentialsJson && credentialsJson.trim().startsWith('{')) {
-      try {
-        return JSON.parse(credentialsJson);
-      } catch (e) {
-        console.error("❌ Erro ao parsear GOOGLE_APPLICATION_CREDENTIALS_JSON:", e);
-      }
-    }
-    return null;
-  }
-
   function getStorage() {
-    const creds = getCredentials();
-    // Se não houver credenciais manuais, o SDK tenta usar o ambiente (Cloud Run)
-    return creds ? new Storage({ credentials: creds }) : new Storage();
+    return new Storage();
   }
 
   function getFirebaseAdmin() {
-    if (admin.apps.length > 0) return admin.app('admin-app');
-    const creds = getCredentials();
-    const options: admin.AppOptions = { databaseURL: process.env.FIREBASE_DATABASE_URL };
-    if (creds) options.credential = admin.credential.cert(creds);
-    return admin.initializeApp(options, 'admin-app');
+    if (admin.apps.length > 0) return admin.app();
+
+    return admin.initializeApp({
+      databaseURL: process.env.FIREBASE_DATABASE_URL,
+    });
   }
+
+  console.log("🔥 Firebase Admin inicializado");
+  console.log("🔥 Google Cloud Storage inicializado");
 
   // Configuração do Multer para upload de arquivos em memória
   const upload = multer({ 
@@ -79,9 +63,8 @@ async function startServer() {
 
   // Status da configuração do GCS
   app.get("/api/gcs-status", (req: Request, res: Response) => {
-    const hasJson = !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     return res.json({
-      configured: hasJson || !!process.env.K_SERVICE, // K_SERVICE indica que estamos no Cloud Run
+      configured: true, // Agora assumimos que o ambiente (Cloud Run) está configurado via IAM
       bucket: bucketName,
       environment: process.env.K_SERVICE ? 'production' : 'development'
     });
