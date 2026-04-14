@@ -300,22 +300,38 @@ export default function ManagerDashboard() {
   const [configured, setConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
-  fetch(window.location.origin + '/api/gcs-status')
-    .then(res => res.json())
-    .then(data => {
-      console.log('🔥 TESTE NOVO:', data.configured);
-      setConfigured(data.configured);
-    })
-    .catch((err) => {
-      console.error('ERRO API:', err); // 🔥 IMPORTANTE
-      setConfigured(false);
-    });
-}, []);
+    fetch(window.location.origin + '/api/gcs-status')
+      .then(res => res.json())
+      .then(data => {
+        console.log('🔥 TESTE NOVO:', data.configured);
+        setConfigured(data.configured);
+        // Se estiver configurado, faz a sincronização automática inicial
+        if (data.configured) {
+          syncWithGCS();
+        }
+      })
+      .catch((err) => {
+        console.error('ERRO API:', err); // 🔥 IMPORTANTE
+        setConfigured(false);
+      });
+
+    // Sincronização periódica a cada 5 minutos
+    const interval = setInterval(() => {
+      if (configured) {
+        syncWithGCS();
+      }
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [configured]);
 
   const [isTransforming, setIsTransforming] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const syncWithGCS = async () => {
+    setIsSyncing(true);
     try {
+      console.log("🔄 Iniciando sincronização automática...");
       const res = await fetch(window.location.origin + '/api/list-embroidery');
       const { files } = await res.json();
       
@@ -383,6 +399,8 @@ export default function ManagerDashboard() {
       }
     } catch (error) {
       console.error("Sync Error:", error);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -419,8 +437,6 @@ export default function ManagerDashboard() {
       throw error;
     }
   };
-
-  const [isSyncing, setIsSyncing] = useState(false);
 
   const handleFullSync = async () => {
     setIsSyncing(true);
@@ -1598,9 +1614,24 @@ export default function ManagerDashboard() {
         <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
           <div className="p-8 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
             <h2 className="text-3xl font-black text-gray-800">Suas Matrizes</h2>
-            <span className="bg-white px-6 py-2 rounded-full text-sm font-black text-gray-400 shadow-sm border border-gray-100 uppercase tracking-widest">
-              {products.length} itens
-            </span>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={syncWithGCS}
+                disabled={isSyncing}
+                className={cn(
+                  "flex items-center gap-2 px-6 py-2 rounded-full text-sm font-black transition-all shadow-sm border uppercase tracking-widest cursor-pointer",
+                  isSyncing 
+                    ? "bg-gray-100 text-gray-300 border-gray-100" 
+                    : "bg-white text-pink-600 border-pink-100 hover:bg-pink-50"
+                )}
+              >
+                <RefreshCw size={16} className={cn(isSyncing && "animate-spin")} />
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
+              </button>
+              <span className="bg-white px-6 py-2 rounded-full text-sm font-black text-gray-400 shadow-sm border border-gray-100 uppercase tracking-widest">
+                {products.length} itens
+              </span>
+            </div>
           </div>
           <div className="hidden md:block">
           <table className="w-full text-left">

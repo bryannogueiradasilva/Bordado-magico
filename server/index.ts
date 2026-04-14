@@ -124,8 +124,12 @@ async function startServer() {
       });
 
       stream.on("error", (err) => {
-        console.error("❌ Erro no stream de upload:", err.message);
-        return res.status(500).json({ error: "Erro ao gravar arquivo no GCS" });
+        console.error("❌ Erro no stream de upload GCS:", err.message);
+        return res.status(500).json({ 
+          error: "Erro ao gravar arquivo no Google Cloud Storage",
+          details: err.message,
+          bucket: bucketName
+        });
       });
 
       stream.on("finish", () => {
@@ -198,6 +202,58 @@ async function startServer() {
       return res.json({ success: true });
     } catch (error: any) {
       console.error("❌ Erro ao deletar usuário:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * SINCRONIZAÇÃO AUTOMÁTICA: GCS <-> FIREBASE
+   * Remove do Firebase as matrizes que não existem mais no GCS.
+   */
+  app.post("/api/sync-gcs-firebase", async (req: Request, res: Response) => {
+    console.log("🔄 Iniciando sincronização GCS -> Firebase...");
+    try {
+      const gcs = getStorage();
+      const adminApp = getFirebaseAdmin();
+      const dbAdmin = adminApp.database();
+
+      // 1. Lista arquivos no GCS
+      const [files] = await gcs.bucket(bucketName).getFiles({ prefix: "arquivos-matrizes/" });
+      const gcsFiles = new Set(files.map(f => f.name));
+
+      // 2. Busca produtos no Firebase
+      const snapshot = await dbAdmin.ref('products').get();
+      if (!snapshot.exists()) {
+        return res.json({ success: true, message: "Nenhum produto para sincronizar." });
+      }
+
+      const products: any[] = snapshot.val();
+      const productsArray = Array.isArray(products) ? products : Object.values(products);
+
+      // 3. Filtra produtos: Mantém apenas os que existem no GCS (ou que não dependem do GCS)
+      const validProducts = productsArray.filter(p => {
+        // Se não tem gcsPath, mantemos (pode ser mock ou link externo)
+        if (!p.gcsPath) return true;
+        // Se tem gcsPath, verificamos se o arquivo existe no GCS
+        return gcsFiles.has(p.gcsPath);
+      });
+
+      const removedCount = productsArray.length - validProducts.length;
+
+      if (removedCount > 0) {
+        console.log(`🧹 Removendo ${removedCount} produtos órfãos do Firebase.`);
+        await dbAdmin.ref('products').set(validProducts);
+      } else {
+        console.log("✅ Tudo sincronizado. Nenhum produto órfão encontrado.");
+      }
+
+      return res.json({ 
+        success: true, 
+        removedCount, 
+        totalCount: validProducts.length 
+      });
+    } catch (error: any) {
+      console.error("❌ Erro na sincronização:", error.message);
       return res.status(500).json({ error: error.message });
     }
   });
