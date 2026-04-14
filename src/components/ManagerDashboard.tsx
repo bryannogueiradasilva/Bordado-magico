@@ -282,67 +282,55 @@ export default function ManagerDashboard() {
   const fetchFiles = async () => {
     setIsSyncing(true);
     try {
-      console.log("🔄 Iniciando sincronização total...");
-      const res = await fetch(API_BASE_URL + '/api/list-embroidery', {
+      const url = API_BASE_URL + '/api/list-embroidery';
+      console.log(`🔄 Iniciando sincronização total... URL: ${url}`);
+      
+      const res = await fetch(url, {
         cache: "no-store"
       });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      
       const data = await res.json();
       console.log("FILES:", data.files);
       
       const filesList = Array.from(
-        new Map((data.files || []).map((f: string) => [f, f])).values()
+        new Map((data.files || []).map((f: any) => {
+          const key = typeof f === 'string' ? f : (f.gcsPath || f.file || JSON.stringify(f));
+          return [key, key];
+        })).values()
       ) as string[];
       
       setFiles(filesList);
       
       if (!filesList) return;
 
-      const allProducts = storage.getProducts();
-      const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
-      const gcsStatusData = await gcsStatusRes.json();
-      const bucket = gcsStatusData.bucket || 'appbordados';
+      // 1. Busca produtos no Firebase Realtime Database (Fonte de Verdade)
+      const rtdbProducts = await storage.getProductsFromRTDB();
+      
+      let updatedProducts: Product[] = rtdbProducts;
 
-      // 1. Filter out products that have a gcsPath but the file is no longer in GCS
-      let updatedProducts = allProducts.filter(p => {
-        if (!p.gcsPath) return true;
-        return filesList.includes(p.gcsPath);
+      // 2. Filtra produtos: Remove duplicados e órfãos (que não estão no GCS)
+      const uniqueProductsMap = new Map();
+      updatedProducts.forEach(p => {
+        if (p.gcsPath && filesList.includes(p.gcsPath)) {
+          uniqueProductsMap.set(p.gcsPath, p);
+        } else if (!p.gcsPath) {
+          uniqueProductsMap.set(p.id, p);
+        }
       });
 
-      // 2. Add products that are in GCS but not in the database
-      const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
-      const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
-
-      if (missingFiles.length > 0) {
-        console.log(`Sync: Found ${missingFiles.length} new files in GCS. Adding to catalog...`);
-        const existingNames = updatedProducts.map(p => p.name);
-        
-        for (const file of missingFiles) {
-          const fileName = file.split('/').pop() || file;
-          const baseName = generateName(fileName);
-          const uniqueName = generateUniqueName(baseName, existingNames);
-          existingNames.push(uniqueName);
-
-          const newProduct: Product = {
-            id: generateId(),
-            name: uniqueName,
-            description: generateDescription(uniqueName),
-            price: 19.90,
-            imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${fileName.split('.').shift()}.png`,
-            fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
-            fileName: fileName,
-            gcsPath: file,
-            category: 'Sincronizado',
-            createdAt: new Date().toISOString(),
-            soldCount: 0,
-            reviews: []
-          };
-          updatedProducts.push(newProduct);
-        }
+      const finalProducts = Array.from(uniqueProductsMap.values());
+      
+      storage.saveProducts(finalProducts);
+      setProducts(finalProducts);
+      
+      // Sincroniza de volta se houver mudanças (limpeza de órfãos)
+      if (finalProducts.length !== updatedProducts.length) {
+        await storage.syncProductsToRTDB(finalProducts);
       }
-
-      storage.saveProducts(updatedProducts);
-      setProducts(updatedProducts);
-      await storage.syncProductsToRTDB(updatedProducts);
     } catch (error) {
       console.error("Sync Error:", error);
     } finally {
@@ -350,7 +338,7 @@ export default function ManagerDashboard() {
     }
   };
 
-  const uploadToGCS = async (file: File) => {
+  const uploadToGCS = async (file: File, imageFile?: File) => {
     console.log("📁 FILE REAL:", file);
     
     // 🔥 FORÇA criação correta do blob (Studio bug fix)
@@ -362,6 +350,9 @@ export default function ManagerDashboard() {
 
     const formData = new FormData();
     formData.append('file', fixedFile);
+    if (imageFile) {
+      formData.append('image', imageFile);
+    }
 
     try {
       const response = await fetch(API_BASE_URL + '/api/upload-embroidery', {
@@ -465,47 +456,12 @@ export default function ManagerDashboard() {
         ));
 
         try {
-          let imageUrl = '';
-          let fileUrl = '';
-          let fileName = '';
-          let gcsPath = '';
-
           if (group.embroidery) {
-            // 1. Upload to GCS
-            const uploadResult = await uploadToGCS(group.embroidery);
-            fileUrl = uploadResult.publicUrl;
-            fileName = group.embroidery.name;
-            gcsPath = uploadResult.gcsPath;
+            // 1. Upload to GCS with Image for AI analysis
+            await uploadToGCS(group.embroidery, group.image);
 
-            // 2. Wait for Cloud Function processing (3-5 seconds as requested)
-            await new Promise(resolve => setTimeout(resolve, 4000));
-
-            // 3. Set the preview URL
-            imageUrl = uploadResult.previewUrl;
-            
-            const currentAllProducts = storage.getProducts();
-            const existingNames = currentAllProducts.map(p => p.name);
-            const friendlyName = generateName(fileName);
-            const uniqueName = generateUniqueName(friendlyName, existingNames);
-
-            const newProduct: Product = {
-              id: generateId(),
-              name: uniqueName,
-              description: generateDescription(uniqueName),
-              price: 19.90,
-              imageUrl: imageUrl || 'https://picsum.photos/seed/embroidery/800/600',
-              fileUrl: fileUrl,
-              fileName: fileName,
-              gcsPath: gcsPath,
-              category: 'Geral',
-              createdAt: new Date().toISOString(),
-              soldCount: 0,
-              reviews: []
-            };
-
-            const updatedProducts = [...currentAllProducts, newProduct];
-            storage.saveProducts(updatedProducts);
-            await storage.syncProductsToRTDB(updatedProducts);
+            // 2. Wait a bit for processing
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
           
           setProcessingFiles(prev => prev.map(p => 
@@ -751,42 +707,11 @@ export default function ManagerDashboard() {
       if (matrixFile) {
         setIsTransforming(true);
         try {
-          // 1. Upload to GCS
-          const uploadResult = await uploadToGCS(matrixFile);
-          const fileUrl = uploadResult.publicUrl;
-          const fileName = matrixFile.name;
-          const gcsPath = uploadResult.gcsPath;
+          // 1. Upload to GCS with Image for AI analysis
+          await uploadToGCS(matrixFile, imageFile);
 
-          // 2. Wait for Cloud Function processing
-          await new Promise(resolve => setTimeout(resolve, 4000));
-
-          // 3. Set the preview URL
-          const imageUrl = uploadResult.previewUrl;
-
-          // Fetch FRESH products to avoid overwriting background updates
-          const currentAllProducts = storage.getProducts();
-          const existingNames = currentAllProducts.map(p => p.name);
-          const friendlyName = generateName(fileName);
-          const uniqueName = generateUniqueName(friendlyName, existingNames);
-
-          const newProduct: Product = {
-            id: generateId(),
-            name: uniqueName,
-            description: generateDescription(uniqueName),
-            price: 19.90,
-            imageUrl: imageUrl || 'https://picsum.photos/seed/embroidery/800/600',
-            fileUrl: fileUrl || '',
-            fileName: fileName || '',
-            gcsPath: gcsPath,
-            category: 'Outros',
-            createdAt: new Date().toISOString(),
-            soldCount: 0,
-            reviews: []
-          };
-          
-          const updatedProducts = [...currentAllProducts, newProduct];
-          storage.saveProducts(updatedProducts);
-          await storage.syncProductsToRTDB(updatedProducts);
+          // 2. Wait a bit for processing
+          await new Promise(resolve => setTimeout(resolve, 2000));
           
           setIsAdding(false);
           setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' });
@@ -794,7 +719,7 @@ export default function ManagerDashboard() {
           // 🔥 SINCRONIZAÇÃO TOTAL APÓS UPLOAD
           await fetchFiles();
           
-          alert(`Matriz "${uniqueName}" processada e cadastrada com sucesso!`);
+          alert(`Matriz processada e cadastrada com sucesso!`);
         } catch (err) {
           console.error("Erro ao processar arquivo manual com GCS:", err);
         } finally {

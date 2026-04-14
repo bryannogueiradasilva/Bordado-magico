@@ -6,10 +6,7 @@
  * quanto no deploy final no Cloud Run.
  */
 
-export const API_BASE_URL = 
-  window.location.hostname.includes("run.app") 
-    ? "" 
-    : "https://remix-bordado-m-gico-matrizes-de-bordado-267339025814.us-west1.run.app";
+export const API_BASE_URL = "https://remix-bordado-m-gico-matrizes-de-bordado-267339025814.us-west1.run.app";
 
 /**
  * Helper para chamadas fetch que garante o tratamento correto de JSON

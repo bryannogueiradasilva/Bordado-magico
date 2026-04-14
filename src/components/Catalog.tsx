@@ -274,63 +274,51 @@ export default function Catalog({ user }: CatalogProps) {
   const fetchFiles = async () => {
     setLoading(true);
     try {
-      console.log("🔄 Sincronizando vitrine com a API...");
-      const res = await fetch(API_BASE_URL + "/api/list-embroidery", {
+      const url = API_BASE_URL + "/api/list-embroidery";
+      console.log(`🔄 Sincronizando vitrine com a API... URL: ${url}`);
+      const res = await fetch(url, {
         cache: "no-store"
       });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      
       const data = await res.json();
       console.log("FILES:", data.files);
 
       const filesList = Array.from(
-        new Map((data.files || []).map((f: string) => [f, f])).values()
+        new Map((data.files || []).map((f: any) => {
+          const key = typeof f === 'string' ? f : (f.gcsPath || f.file || JSON.stringify(f));
+          return [key, key];
+        })).values()
       ) as string[];
 
-      const allProducts = storage.getProducts();
-      const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
-      const gcsStatusData = await gcsStatusRes.json();
-      const bucket = gcsStatusData.bucket || 'appbordados';
-
-      // 1. Filter out products that have a gcsPath but the file is no longer in GCS
-      let updatedProducts = allProducts.filter(p => {
-        if (!p.gcsPath) return true;
-        return filesList.includes(p.gcsPath);
+      // 1. Busca produtos no Firebase Realtime Database (Fonte de Verdade)
+      const rtdbProducts = await storage.getProductsFromRTDB();
+      
+      // 2. Filtra produtos: Remove duplicados e órfãos (que não estão no GCS)
+      const uniqueProductsMap = new Map();
+      rtdbProducts.forEach(p => {
+        if (p.gcsPath && filesList.includes(p.gcsPath)) {
+          uniqueProductsMap.set(p.gcsPath, p);
+        } else if (!p.gcsPath) {
+          uniqueProductsMap.set(p.id, p);
+        }
       });
 
-      // 2. Add products that are in GCS but not in the database
-      const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
-      const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
+      const finalProducts = Array.from(uniqueProductsMap.values());
 
-      if (missingFiles.length > 0) {
-        const existingNames = updatedProducts.map(p => p.name);
-        for (const file of missingFiles) {
-          const fileName = file.split('/').pop() || file;
-          const baseName = generateName(fileName);
-          const uniqueName = generateUniqueName(baseName, existingNames);
-          existingNames.push(uniqueName);
-
-          const newProduct: Product = {
-            id: Math.random().toString(36).substr(2, 9),
-            name: uniqueName,
-            description: generateDescription(uniqueName),
-            price: 19.90,
-            imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${fileName.split('.').shift()}.png`,
-            fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
-            fileName: fileName,
-            gcsPath: file,
-            category: 'Sincronizado',
-            createdAt: new Date().toISOString(),
-            soldCount: 0,
-            reviews: []
-          };
-          updatedProducts.push(newProduct);
+      storage.saveProducts(finalProducts);
+      setProducts(finalProducts);
+      
+      // Sincroniza de volta se houver mudanças (limpeza de órfãos)
+      if (finalProducts.length !== rtdbProducts.length) {
+        try {
+          await storage.syncProductsToRTDB(finalProducts);
+        } catch (e) {
+          console.warn("Could not sync cleaned list to RTDB (might be unauthorized):", e);
         }
-      }
-
-      storage.saveProducts(updatedProducts);
-      setProducts(updatedProducts);
-      // Sync to RTDB if it's the first time or something changed
-      if (missingFiles.length > 0 || updatedProducts.length !== allProducts.length) {
-        await storage.syncProductsToRTDB(updatedProducts);
       }
     } catch (err) {
       console.error("Erro ao sincronizar vitrine:", err);
