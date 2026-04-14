@@ -198,6 +198,24 @@ async function startServer() {
     }
   });
 
+  // Admin: Atualizar usuário do Firebase
+  app.patch("/api/admin/users/:uid", async (req: Request, res: Response) => {
+    const { uid } = req.params;
+    const { email, password, displayName } = req.body;
+    try {
+      const adminApp = getFirebaseAdmin();
+      await adminApp.auth().updateUser(uid, {
+        email,
+        password: password || undefined,
+        displayName
+      });
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("❌ Erro ao atualizar usuário:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
   /**
    * SINCRONIZAÇÃO AUTOMÁTICA: GCS <-> FIREBASE
    * Remove do Firebase as matrizes que não existem mais no GCS.

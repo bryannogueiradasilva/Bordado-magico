@@ -72,76 +72,28 @@ export default function ManagerDashboard() {
       setLoading(false);
     });
 
-    // 🔥 Sincronização automática de usuários (RTDB)
-    const unsubscribeUsers = storage.subscribeToUsers((rtdbUsers) => {
-      setUsers(rtdbUsers);
-      if (activeTab === 'users') {
-        setLoading(false);
-      }
-    });
-
-    // 🔥 Sincronização periódica com Firebase Auth (para garantir consistência)
-    if (activeTab === 'users') {
-      fetchUsers();
-    }
-
-    const authSyncInterval = setInterval(() => {
-      fetchUsers();
-    }, 30000); // Sincroniza com Auth a cada 30 segundos
+    // 🔥 Carregar clientes apenas via API
+    fetchUsers();
 
     return () => {
       unsubscribeProducts();
-      unsubscribeUsers();
-      clearInterval(authSyncInterval);
     };
-  }, [activeTab]);
+  }, []);
 
   const fetchUsers = async () => {
     try {
+      setLoading(true);
       console.log("🌐 Chamando API:", API_BASE_URL);
       const response = await fetch(API_BASE_URL + '/api/admin/users');
       const data = await response.json();
       
-      if (data.users && data.users.length > 0) {
-        setApiWarning(null);
-        const authUids = new Set(data.users.map((u: any) => u.uid));
-        
-        // 1. Sync missing Auth users to RTDB
-        for (const fbUser of data.users) {
-          const existing = await storage.getUserFromRTDB(fbUser.uid);
-          if (!existing) {
-            const newUser: any = {
-              id: fbUser.uid,
-              name: fbUser.displayName || 'Sem Nome',
-              email: fbUser.email,
-              whatsapp: '',
-              role: fbUser.email === 'bryannogueira07@gmail.com' ? 'manager' : 'client',
-              active: true,
-              status: 'active',
-              createdAt: fbUser.metadata?.creationTime || new Date().toISOString()
-            };
-            await storage.syncUserToRTDB(newUser);
-          }
-        }
-
-        // 2. Remove users from RTDB that are no longer in Auth
-        // (Only if we successfully got a full list from Auth)
-        const currentRtdbUsers = storage.getUsers();
-        // Usamos uma referência estável para os usuários atuais para evitar problemas de closure
-        setUsers(prevUsers => {
-          for (const rUser of prevUsers) {
-            if (!authUids.has(rUser.id) && rUser.role !== 'manager' && rUser.email !== 'bryannogueira07@gmail.com') {
-              console.log(`User ${rUser.email} not found in Auth, removing from RTDB...`);
-              storage.deleteUserFromRTDB(rUser.id);
-            }
-          }
-          return prevUsers;
-        });
-      } else if (data.warning) {
-        setApiWarning(data.warning);
-      }
+      console.log("USUÁRIOS DA API:", data.users);
+      setUsers(data.users || []);
+      setApiWarning(data.warning || null);
     } catch (error) {
       console.error("Error fetching users from Auth:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -161,36 +113,8 @@ export default function ManagerDashboard() {
 
       if (!response.ok) throw new Error('Failed to update user in Firebase');
 
-      // Update Realtime Database
-      const updatedUser: any = {
-        id: uid,
-        name: userFormData.name,
-        email: userFormData.email,
-        whatsapp: userFormData.whatsapp,
-        active: userFormData.active,
-        status: (userFormData.active ? 'active' : 'inactive') as 'active' | 'inactive'
-      };
-      await storage.syncUserToRTDB(updatedUser);
-
-      // Update local storage
-      const localUsers = storage.getUsers();
-      const updatedLocalUsers = localUsers.map(u => {
-        if (u.id === uid || u.email.toLowerCase() === userFormData.email.toLowerCase()) {
-          return {
-            ...u,
-            name: userFormData.name,
-            email: userFormData.email,
-            whatsapp: userFormData.whatsapp,
-            active: userFormData.active,
-            status: (userFormData.active ? 'active' : 'inactive') as 'active' | 'inactive'
-          };
-        }
-        return u;
-      });
-      storage.saveUsers(updatedLocalUsers);
-      
       setEditingUser(null);
-      fetchUsers();
+      await fetchUsers();
     } catch (error) {
       console.error("Error updating user:", error);
       alert("Erro ao atualizar usuário.");
@@ -200,7 +124,7 @@ export default function ManagerDashboard() {
   };
 
   const handleDeleteUser = async (uid: string) => {
-    const userToDelete = users.find(u => u.id === uid);
+    const userToDelete = users.find(u => u.uid === uid);
     if (userToDelete?.email === 'bryannogueira07@gmail.com') {
       alert("O administrador principal não pode ser excluído.");
       return;
@@ -211,7 +135,7 @@ export default function ManagerDashboard() {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
   const handleDeleteAllClients = async () => {
-    const clientsToDelete = users.filter(u => u.role !== 'manager' && u.email !== 'bryannogueira07@gmail.com');
+    const clientsToDelete = users.filter(u => u.uid && u.email !== 'bryannogueira07@gmail.com');
     
     if (clientsToDelete.length === 0) {
       alert("Não há clientes para excluir.");
@@ -233,15 +157,11 @@ export default function ManagerDashboard() {
         try {
           // 1. Auth Delete
           console.log("🌐 Chamando API:", API_BASE_URL);
-          const response = await fetch(API_BASE_URL + `/api/admin/users/${client.id}`, { method: 'DELETE' });
-          const data = await response.json();
+          const response = await fetch(API_BASE_URL + `/api/admin/users/${client.uid}`, { method: 'DELETE' });
           
           if (response.ok) {
-            // 2. RTDB Delete
-            await storage.deleteUserFromRTDB(client.id);
             successCount++;
           } else {
-            console.error(`Failed to delete ${client.email}:`, data.error);
             failCount++;
           }
         } catch (err) {
@@ -250,14 +170,8 @@ export default function ManagerDashboard() {
         }
       }
 
-      // 3. Update local storage
-      const remainingUsers = storage.getUsers().filter(u => 
-        u.role === 'manager' || u.email === 'bryannogueira07@gmail.com'
-      );
-      storage.saveUsers(remainingUsers);
-      
       alert(`Limpeza concluída!\nSucesso: ${successCount}\nFalhas: ${failCount}`);
-      fetchUsers();
+      await fetchUsers();
     } catch (error) {
       console.error("Bulk delete error:", error);
       alert("Erro durante a exclusão em massa.");
@@ -268,7 +182,7 @@ export default function ManagerDashboard() {
   };
 
   const confirmDeleteUser = async (uid: string) => {
-    const userToDelete = users.find(u => u.id === uid);
+    const userToDelete = users.find(u => u.uid === uid);
     if (userToDelete?.email === 'bryannogueira07@gmail.com') {
       alert("O administrador principal não pode ser excluído.");
       setDeletingId(null);
@@ -291,16 +205,8 @@ export default function ManagerDashboard() {
         return;
       }
 
-      // 2. Delete from Realtime Database
-      await storage.deleteUserFromRTDB(uid);
-
-      // 3. Update local storage
-      const localUsers = storage.getUsers();
-      const updatedLocalUsers = localUsers.filter(u => u.id !== uid);
-      storage.saveUsers(updatedLocalUsers);
-      
       setDeletingId(null);
-      fetchUsers();
+      await fetchUsers();
     } catch (error) {
       console.error("Error deleting user:", error);
       alert("Erro ao excluir usuário.");
@@ -667,11 +573,13 @@ export default function ManagerDashboard() {
     p.fileName?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredUsers = users.filter(u => 
-    u.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.whatsapp?.includes(searchTerm)
-  );
+  const filteredUsers = users
+    .filter(u => u.uid) // 🔥 Filtrar clientes inválidos antes de renderizar
+    .filter(u => 
+      (u.displayName || u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.whatsapp?.includes(searchTerm)
+    );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1151,7 +1059,7 @@ export default function ManagerDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredUsers.map((user) => (
               <motion.div
-                key={user.id}
+                key={user.uid}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6 hover:shadow-xl transition-all"
@@ -1162,15 +1070,15 @@ export default function ManagerDashboard() {
                       <User className="text-purple-600" size={24} />
                     </div>
                     <div>
-                      <h3 className="font-black text-gray-800">{user.name || 'Sem Nome'}</h3>
-                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{user.role === 'manager' ? 'Administrador' : 'Cliente'}</p>
+                      <h3 className="font-black text-gray-800">{user.displayName || user.name || 'Sem Nome'}</h3>
+                      <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{user.email === 'bryannogueira07@gmail.com' ? 'Administrador' : 'Cliente'}</p>
                     </div>
                   </div>
                   <div className={cn(
                     "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                    user.active ? "bg-green-100 text-green-600" : "bg-red-100 text-red-600"
+                    user.disabled ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600"
                   )}>
-                    {user.active ? 'Ativo' : 'Inativo'}
+                    {user.disabled ? 'Inativo' : 'Ativo'}
                   </div>
                 </div>
 
@@ -1181,7 +1089,7 @@ export default function ManagerDashboard() {
                   </div>
                   <div className="flex items-center gap-2 text-gray-600">
                     <MessageSquare size={16} className="text-gray-400" />
-                    <span className="text-sm font-medium">{user.whatsapp || 'Não informado'}</span>
+                    <span className="text-sm font-medium">{user.phoneNumber || user.whatsapp || 'Não informado'}</span>
                   </div>
                 </div>
 
@@ -1190,12 +1098,12 @@ export default function ManagerDashboard() {
                     onClick={() => {
                       setEditingUser(user);
                       setUserFormData({
-                        name: user.name || '',
-                        email: user.email,
-                        whatsapp: user.whatsapp || '',
+                        name: user.displayName || user.name || '',
+                        email: user.email || '',
+                        whatsapp: user.phoneNumber || user.whatsapp || '',
                         password: '',
-                        active: user.active ?? true,
-                        status: user.status || 'active'
+                        active: !user.disabled,
+                        status: user.disabled ? 'inactive' : 'active'
                       });
                     }}
                     className="flex-1 bg-gray-50 text-gray-600 py-3 rounded-xl font-bold hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
@@ -1203,7 +1111,7 @@ export default function ManagerDashboard() {
                     <Edit size={18} /> Editar
                   </button>
                   <button
-                    onClick={() => handleDeleteUser(user.id)}
+                    onClick={() => handleDeleteUser(user.uid)}
                     className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all"
                   >
                     <Trash2 size={18} />
