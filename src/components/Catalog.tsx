@@ -211,11 +211,6 @@ export default function Catalog({ user }: CatalogProps) {
   const { setCurrentPageId } = usePresence();
   const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
-  
-  useEffect(() => {
-    setCurrentPageId('home');
-    return () => setCurrentPageId(null);
-  }, [setCurrentPageId]);
   const [config, setConfig] = useState<AppConfig>({ buttonsEnabled: true });
   const [searchTerm, setSearchTerm] = useState('');
   const [category, setCategory] = useState('Todas');
@@ -238,12 +233,120 @@ export default function Catalog({ user }: CatalogProps) {
       setPendingAction(null);
     }
   }, [user, pendingAction]);
+  
+  const generateName = (fileName: string) => {
+    return fileName
+      .replace(/\.[^/.]+$/, "")
+      .replace(/[-_]/g, " ")
+      .toLowerCase()
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  };
+
+  const generateUniqueName = (name: string, existingNames: string[]) => {
+    let count = 1;
+    let newName = name;
+    while (existingNames.includes(newName)) {
+      newName = `${name} ${count}`;
+      count++;
+    }
+    return newName;
+  };
+
+  const generateDescription = (name: string) => {
+    return `✨ Matriz de bordado "${name}" perfeita para criar peças incríveis e encantar suas clientes!
+
+🧵 Ideal para bordadeiras que querem se destacar e vender mais
+💎 Design exclusivo e de alta qualidade
+🚀 Pronta para uso imediato
+
+👉 Garanta agora e transforme seus bordados em verdadeiras obras de arte!
+
+🔥 Baixe agora e aumente suas vendas com bordados profissionais!`;
+  };
 
   useEffect(() => {
-    // Load config and favorites locally
+    setCurrentPageId('home');
+    return () => setCurrentPageId(null);
+  }, [setCurrentPageId]);
+
+  const fetchFiles = async () => {
+    setLoading(true);
+    try {
+      console.log("🔄 Sincronizando vitrine com a API...");
+      const res = await fetch(API_BASE_URL + "/api/list-embroidery", {
+        cache: "no-store"
+      });
+      const data = await res.json();
+      console.log("FILES:", data.files);
+
+      const filesList = Array.from(
+        new Map((data.files || []).map((f: string) => [f, f])).values()
+      ) as string[];
+
+      const allProducts = storage.getProducts();
+      const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
+      const gcsStatusData = await gcsStatusRes.json();
+      const bucket = gcsStatusData.bucket || 'appbordados';
+
+      // 1. Filter out products that have a gcsPath but the file is no longer in GCS
+      let updatedProducts = allProducts.filter(p => {
+        if (!p.gcsPath) return true;
+        return filesList.includes(p.gcsPath);
+      });
+
+      // 2. Add products that are in GCS but not in the database
+      const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
+      const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
+
+      if (missingFiles.length > 0) {
+        const existingNames = updatedProducts.map(p => p.name);
+        for (const file of missingFiles) {
+          const fileName = file.split('/').pop() || file;
+          const baseName = generateName(fileName);
+          const uniqueName = generateUniqueName(baseName, existingNames);
+          existingNames.push(uniqueName);
+
+          const newProduct: Product = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: uniqueName,
+            description: generateDescription(uniqueName),
+            price: 19.90,
+            imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${fileName.split('.').shift()}.png`,
+            fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
+            fileName: fileName,
+            gcsPath: file,
+            category: 'Sincronizado',
+            createdAt: new Date().toISOString(),
+            soldCount: 0,
+            reviews: []
+          };
+          updatedProducts.push(newProduct);
+        }
+      }
+
+      storage.saveProducts(updatedProducts);
+      setProducts(updatedProducts);
+      // Sync to RTDB if it's the first time or something changed
+      if (missingFiles.length > 0 || updatedProducts.length !== allProducts.length) {
+        await storage.syncProductsToRTDB(updatedProducts);
+      }
+    } catch (err) {
+      console.error("Erro ao sincronizar vitrine:", err);
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     setConfig(storage.getConfig());
     setFavorites(storage.getFavorites());
     
+    // Initial fetch from API
+    fetchFiles();
+
     // Subscribe to real-time products from RTDB
     const unsubscribe = storage.subscribeToProducts((rtdbProducts) => {
       console.log("MATRIZES DO BACKEND (RTDB):", rtdbProducts);
@@ -251,29 +354,10 @@ export default function Catalog({ user }: CatalogProps) {
         setProducts(rtdbProducts);
         storage.saveProducts(rtdbProducts);
       } else {
-        setProducts([]);
+        // If RTDB is empty, we don't clear immediately, we trust the fetchFiles sync
       }
-      setLoading(false);
     });
 
-    // 🔥 Garantir que a vitrine use SOMENTE dados da API (Verificação de arquivos)
-    const fetchFiles = async () => {
-      try {
-        const res = await fetch(API_BASE_URL + "/api/list-embroidery");
-        const data = await res.json();
-        console.log("MATRIZES DA API (GCS):", data.files);
-        
-        if (!data.files) {
-          // Se a API falhar ou não houver arquivos, não fazemos nada drástico aqui 
-          // pois os produtos vêm do RTDB, mas registramos o log.
-        }
-      } catch (err) {
-        console.error("Erro ao verificar arquivos da API:", err);
-      }
-    };
-    fetchFiles();
-
-    // Poll for config and favorites (still local for now)
     const interval = setInterval(() => {
       setConfig(storage.getConfig());
       setFavorites(storage.getFavorites());
