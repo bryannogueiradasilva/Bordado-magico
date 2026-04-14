@@ -303,7 +303,7 @@ export default function ManagerDashboard() {
   fetch(window.location.origin + '/api/gcs-status')
     .then(res => res.json())
     .then(data => {
-      console.log('STATUS API:', data); // 🔥 IMPORTANTE
+      console.log('🔥 TESTE NOVO:', data.configured);
       setConfigured(data.configured);
     })
     .catch((err) => {
