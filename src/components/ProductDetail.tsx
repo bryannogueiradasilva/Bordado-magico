@@ -1,6 +1,6 @@
 import { useState, useEffect, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, 
   Download, 
@@ -62,6 +62,16 @@ export default function ProductDetail({ user }: ProductDetailProps) {
     imageUrl: ''
   });
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'buy' | 'download' | null>(null);
+
+  useEffect(() => {
+    if (user && pendingAction) {
+      if (pendingAction === 'buy') handlePurchase();
+      else if (pendingAction === 'download') handleConvertAndDownload();
+      setPendingAction(null);
+    }
+  }, [user, pendingAction]);
 
   const displayFormat = selectedFormat === 'JEF' ? 'JEFF' : selectedFormat;
 
@@ -188,47 +198,57 @@ export default function ProductDetail({ user }: ProductDetailProps) {
   }
 
   const handlePurchase = async () => {
-    const user = storage.getCurrentUser();
     if (!user) {
-      sessionStorage.setItem('redirectAfterLogin', window.location.pathname);
-      navigate('/login');
+      setPendingAction('buy');
+      setShowLoginModal(true);
       return;
     }
 
-    const orders = storage.getOrders();
-    const newOrder = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: user.id,
-      productId: product.id,
-      status: 'completed',
-      amount: product.price,
-      createdAt: new Date().toISOString(),
-    };
-    
-    storage.saveOrders([...orders, newOrder]);
-    
-    // Increment sold count
-    const allProducts = storage.getProducts();
-    const updatedProducts = allProducts.map(p => 
-      p.id === product.id ? { ...p, soldCount: (p.soldCount || 0) + 1 } : p
-    );
-    storage.saveProducts(updatedProducts);
     try {
-      await storage.syncProductsToRTDB(updatedProducts); // Sync to RTDB
-    } catch (err: any) {
-      console.error("Erro ao sincronizar venda:", err);
-      if (err.message?.includes('PERMISSION_DENIED') || err.code === 'PERMISSION_DENIED') {
-        console.warn("Venda registrada localmente, mas falhou ao sincronizar (Permissão Negada).");
-      }
-    }
-    setProduct(prev => prev ? { ...prev, soldCount: (prev.soldCount || 0) + 1 } : null);
+      // 1. Registrar na API (vínculo permanente)
+      await fetch(API_BASE_URL + "/api/purchase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, fileId: product.id })
+      });
 
-    setIsPurchased(true);
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3000);
+      // 2. Lógica local existente
+      const orders = storage.getOrders();
+      const newOrder = {
+        id: Math.random().toString(36).substr(2, 9),
+        userId: user.id,
+        productId: product.id,
+        status: 'completed',
+        amount: product.price,
+        createdAt: new Date().toISOString(),
+      };
+      
+      storage.saveOrders([...orders, newOrder]);
+      
+      // Increment sold count
+      const allProducts = storage.getProducts();
+      const updatedProducts = allProducts.map(p => 
+        p.id === product.id ? { ...p, soldCount: (p.soldCount || 0) + 1 } : p
+      );
+      storage.saveProducts(updatedProducts);
+      await storage.syncProductsToRTDB(updatedProducts); // Sync to RTDB
+      
+      setProduct(prev => prev ? { ...prev, soldCount: (prev.soldCount || 0) + 1 } : null);
+      setIsPurchased(true);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (err) {
+      console.error("Erro ao processar compra:", err);
+      alert("Erro ao processar compra. Tente novamente.");
+    }
   };
 
   const handleConvertAndDownload = async () => {
+    if (!user) {
+      setPendingAction('download');
+      setShowLoginModal(true);
+      return;
+    }
     if (!isPurchased) {
       handlePurchase();
       return;
@@ -661,6 +681,54 @@ export default function ProductDetail({ user }: ProductDetailProps) {
           </div>
         )}
       </div>
+
+      {/* Login Modal */}
+      <AnimatePresence>
+        {showLoginModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white p-8 md:p-12 rounded-[40px] max-w-md w-full text-center shadow-2xl border border-pink-100"
+            >
+              <div className="bg-pink-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Shield className="text-pink-600 w-10 h-10" />
+              </div>
+              <h2 className="text-3xl font-black text-gray-800 mb-4">Acesso Restrito</h2>
+              <p className="text-gray-500 mb-8 font-medium">
+                Para baixar ou comprar matrizes, você precisa estar logada em sua conta.
+              </p>
+              
+              <div className="space-y-4">
+                <button
+                  onClick={() => navigate('/login')}
+                  className="w-full bg-pink-500 text-white py-4 rounded-2xl font-bold text-xl shadow-lg hover:bg-pink-600 transition-all active:scale-95 cursor-pointer"
+                >
+                  Fazer Login
+                </button>
+                <button
+                  onClick={() => navigate('/register')}
+                  className="w-full bg-gray-100 text-gray-600 py-4 rounded-2xl font-bold text-xl hover:bg-gray-200 transition-all active:scale-95 cursor-pointer"
+                >
+                  Criar Conta Grátis
+                </button>
+                <button
+                  onClick={() => setShowLoginModal(false)}
+                  className="text-gray-400 font-bold hover:text-gray-600 transition-all cursor-pointer pt-2"
+                >
+                  Continuar Navegando
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

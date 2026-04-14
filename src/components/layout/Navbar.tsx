@@ -46,7 +46,9 @@ export default function Navbar({ user, onLogout }: NavbarProps) {
 
           {/* Desktop Menu */}
           <div className="hidden md:flex items-center space-x-6">
-            <Link to="/" className="text-lg font-medium hover:text-pink-500 transition-colors">Matrizes</Link>
+            {user && (
+              <Link to="/my-files" className="text-lg font-medium hover:text-pink-500 transition-colors">Minhas Matrizes</Link>
+            )}
             {(user?.role === 'manager' || isOwner) && (
               <Link to="/manager" className="flex items-center space-x-1 text-lg font-medium text-purple-600 hover:text-purple-700">
                 <LayoutDashboard size={20} />
@@ -108,10 +110,12 @@ export default function Navbar({ user, onLogout }: NavbarProps) {
             className="md:hidden bg-white border-t border-pink-50 overflow-hidden shadow-xl"
           >
             <div className="flex flex-col p-6 space-y-6">
-              <Link to="/" onClick={() => setIsOpen(false)} className="text-2xl font-bold text-gray-800 py-2 border-b border-gray-50 flex items-center gap-2">
-                <ShoppingBag size={24} className="text-pink-500" />
-                Matrizes
-              </Link>
+              {user && (
+                <Link to="/my-files" onClick={() => setIsOpen(false)} className="text-2xl font-bold text-gray-800 py-2 border-b border-gray-50 flex items-center gap-2">
+                  <Flower2 size={24} className="text-pink-500" />
+                  Minhas Matrizes
+                </Link>
+              )}
               {(user?.role === 'manager' || isOwner) && (
                 <Link to="/manager" onClick={() => setIsOpen(false)} className="text-2xl font-bold text-purple-600 py-2 border-b border-gray-50 flex items-center gap-2">
                   <LayoutDashboard size={24} />

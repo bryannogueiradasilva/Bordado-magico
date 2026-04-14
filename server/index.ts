@@ -216,6 +216,103 @@ async function startServer() {
     }
   });
 
+  // ==========================================
+  // SISTEMA DE PRESENÇA (IN-MEMORY)
+  // ==========================================
+  const userPresence = new Map<string, number>();
+
+  // Atualizar presença (Heartbeat)
+  app.post("/api/presence/update", (req: Request, res: Response) => {
+    const { uid, lastSeen } = req.body;
+    if (uid) {
+      userPresence.set(uid, lastSeen || Date.now());
+    }
+    return res.json({ success: true });
+  });
+
+  // Marcar como offline
+  app.post("/api/presence/offline", (req: Request, res: Response) => {
+    const { uid } = req.body;
+    if (uid) {
+      userPresence.delete(uid);
+    }
+    return res.json({ success: true });
+  });
+
+  // Listar usuários online
+  app.get("/api/presence/list", (req: Request, res: Response) => {
+    const list = Array.from(userPresence.entries()).map(([uid, lastSeen]) => ({
+      uid,
+      lastSeen
+    }));
+    return res.json({ presence: list });
+  });
+
+  // ==========================================
+  // SISTEMA DE COMPRAS E ACESSO (MY FILES)
+  // ==========================================
+  
+  // Registrar compra / vínculo de arquivo
+  app.post("/api/purchase", async (req: Request, res: Response) => {
+    const { userId, fileId } = req.body;
+    if (!userId || !fileId) {
+      return res.status(400).json({ error: "userId e fileId são obrigatórios" });
+    }
+
+    try {
+      const adminApp = getFirebaseAdmin();
+      const dbAdmin = adminApp.database();
+      
+      const purchaseId = `${userId}_${fileId}`;
+      await dbAdmin.ref(`purchases/${purchaseId}`).set({
+        userId,
+        fileId,
+        createdAt: Date.now()
+      });
+
+      return res.json({ success: true });
+    } catch (error: any) {
+      console.error("❌ Erro ao registrar compra:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Listar arquivos do usuário (Minhas Matrizes)
+  app.get("/api/my-files/:uid", async (req: Request, res: Response) => {
+    const { uid } = req.params;
+    try {
+      const adminApp = getFirebaseAdmin();
+      const dbAdmin = adminApp.database();
+
+      // 1. Busca compras do usuário
+      const purchasesSnapshot = await dbAdmin.ref('purchases')
+        .orderByChild('userId')
+        .equalTo(uid)
+        .get();
+
+      if (!purchasesSnapshot.exists()) {
+        return res.json({ files: [] });
+      }
+
+      const purchases = Object.values(purchasesSnapshot.val() as Record<string, any>);
+      const fileIds = purchases.map(p => p.fileId);
+
+      // 2. Busca os detalhes dos produtos
+      const productsSnapshot = await dbAdmin.ref('products').get();
+      if (!productsSnapshot.exists()) {
+        return res.json({ files: [] });
+      }
+
+      const allProducts: any[] = Object.values(productsSnapshot.val());
+      const userFiles = allProducts.filter(p => fileIds.includes(p.id));
+
+      return res.json({ files: userFiles });
+    } catch (error: any) {
+      console.error("❌ Erro ao buscar arquivos do usuário:", error.message);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
   /**
    * SINCRONIZAÇÃO AUTOMÁTICA: GCS <-> FIREBASE
    * Remove do Firebase as matrizes que não existem mais no GCS.

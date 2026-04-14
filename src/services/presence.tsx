@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { ref, set, onDisconnect, onValue, serverTimestamp } from 'firebase/database';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth, db } from '../firebase';
+import { auth } from '../firebase';
 import { User as UserType } from './storage';
+import { API_BASE_URL } from '../config';
 
 interface PresenceContextType {
   globalOnlineCount: number;
@@ -21,6 +21,8 @@ export const usePresence = () => {
   }
   return context;
 };
+
+const ONLINE_THRESHOLD = 30000; // 30 segundos
 
 export const PresenceProvider: React.FC<{ user: UserType | null; children: React.ReactNode }> = ({ user, children }) => {
   const [globalOnlineCount, setGlobalOnlineCount] = useState(0);
@@ -44,84 +46,95 @@ export const PresenceProvider: React.FC<{ user: UserType | null; children: React
     return () => unsubscribe();
   }, []);
 
-  // 2. Handle Global Presence
+  // 2. Heartbeat e Presence Tracking
   useEffect(() => {
-    if (!isFirebaseAuthenticated || !auth.currentUser) {
-      setGlobalOnlineCount(0);
-      return;
-    }
+    if (!isFirebaseAuthenticated || !auth.currentUser) return;
 
     const uid = auth.currentUser.uid;
-    const globalRef = ref(db, `online/global/${uid}`);
-    const globalListRef = ref(db, 'online/global');
 
-    // Set presence and setup onDisconnect
-    const setupPresence = async () => {
+    const updateUserPresence = async () => {
       try {
-        await set(globalRef, {
-          online: true,
-          lastSeen: serverTimestamp(),
-          appUserId: user?.id || 'anonymous',
-          name: user?.name || 'Visitante'
+        await fetch(API_BASE_URL + "/api/presence/update", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            uid: uid,
+            lastSeen: Date.now(),
+          }),
         });
-        await onDisconnect(globalRef).remove();
       } catch (err) {
-        console.error("Erro ao configurar presença:", err);
+        console.error("Erro no heartbeat de presença:", err);
       }
     };
 
-    setupPresence();
+    // Heartbeat inicial
+    updateUserPresence();
 
-    // Listen for global count
-    const unsubscribeGlobal = onValue(globalListRef, (snapshot) => {
-      const data = snapshot.val();
-      setGlobalOnlineCount(data ? Object.keys(data).length : 0);
-    });
+    // Heartbeat a cada 10 segundos
+    const heartbeatInterval = setInterval(updateUserPresence, 10000);
+
+    // Marcar offline ao sair (beforeunload)
+    const handleBeforeUnload = () => {
+      navigator.sendBeacon(
+        API_BASE_URL + "/api/presence/offline",
+        JSON.stringify({ uid: uid })
+      );
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
-      unsubscribeGlobal();
-      set(globalRef, null).catch(() => {}); // Manually clear if unmounting
+      clearInterval(heartbeatInterval);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // Tenta marcar offline ao desmontar o componente também
+      fetch(API_BASE_URL + "/api/presence/offline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: uid }),
+        keepalive: true
+      }).catch(() => {});
     };
-  }, [isFirebaseAuthenticated, user?.id, user?.name]);
+  }, [isFirebaseAuthenticated]);
 
-  // 3. Handle Page Presence
+  // 3. Fetch Presence List e Contagem
   useEffect(() => {
-    if (!isFirebaseAuthenticated || !currentPageId || !auth.currentUser) {
-      setPageOnlineCount(0);
-      return;
-    }
-
-    const uid = auth.currentUser.uid;
-    const pageRef = ref(db, `online/paginas/${currentPageId}/${uid}`);
-    const pageListRef = ref(db, `online/paginas/${currentPageId}`);
-
-    // Set presence on page and setup onDisconnect
-    const setupPagePresence = async () => {
+    const fetchPresence = async () => {
       try {
-        await set(pageRef, {
-          online: true,
-          lastSeen: serverTimestamp(),
-          name: user?.name || 'Visitante'
-        });
-        await onDisconnect(pageRef).remove();
+        const res = await fetch(API_BASE_URL + "/api/presence/list");
+        const data = await res.json();
+        
+        if (data.presence) {
+          const now = Date.now();
+          // Filtrar duplicados e usuários inativos (threshold)
+          const uniqueUsersMap = new Map();
+          data.presence.forEach((p: any) => {
+            if (now - p.lastSeen < ONLINE_THRESHOLD) {
+              uniqueUsersMap.set(p.uid, p);
+            }
+          });
+
+          const onlineUsers = Array.from(uniqueUsersMap.values());
+          setGlobalOnlineCount(onlineUsers.length);
+          
+          // Nota: A contagem por página pode ser implementada se a rota suportar, 
+          // mas por enquanto mantemos a global conforme solicitado.
+          setPageOnlineCount(onlineUsers.length); 
+        }
       } catch (err) {
-        console.error("Erro ao configurar presença na página:", err);
+        console.error("Erro ao buscar lista de presença:", err);
       }
     };
 
-    setupPagePresence();
+    // Busca inicial
+    fetchPresence();
 
-    // Listen for page count
-    const unsubscribePage = onValue(pageListRef, (snapshot) => {
-      const data = snapshot.val();
-      setPageOnlineCount(data ? Object.keys(data).length : 0);
-    });
+    // Atualiza a cada 5 segundos
+    const fetchInterval = setInterval(fetchPresence, 5000);
 
-    return () => {
-      unsubscribePage();
-      set(pageRef, null).catch(() => {}); // Manually clear if unmounting
-    };
-  }, [isFirebaseAuthenticated, currentPageId, user?.name]);
+    return () => clearInterval(fetchInterval);
+  }, []);
 
   return (
     <PresenceContext.Provider value={{ globalOnlineCount, pageOnlineCount, currentPageId, setCurrentPageId, authError }}>

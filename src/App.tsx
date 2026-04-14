@@ -15,6 +15,7 @@ import Catalog from './components/Catalog';
 import ManagerDashboard from './components/ManagerDashboard';
 import OwnerPanel from './components/OwnerPanel';
 import ProductDetail from './components/ProductDetail';
+import MyFiles from './components/MyFiles';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 
@@ -100,7 +101,7 @@ export default function App() {
           <Navbar user={user} onLogout={handleLogout} />
           <main className="container mx-auto px-4 py-6 md:py-8">
             <Routes>
-              <Route path="/" element={user ? <Catalog user={user} /> : <Navigate to="/login" />} />
+              <Route path="/" element={<Catalog user={user} />} />
               <Route path="/login" element={!user ? <Login onLogin={setUser} /> : <Navigate to="/" />} />
               <Route path="/register" element={!user ? <Register /> : <Navigate to="/" />} />
               <Route 
@@ -111,7 +112,8 @@ export default function App() {
                 path="/owner" 
                 element={isOwner ? <OwnerPanel /> : <Navigate to="/login" />} 
               />
-              <Route path="/product/:id" element={user ? <ProductDetail user={user} /> : <Navigate to="/login" />} />
+              <Route path="/product/:id" element={<ProductDetail user={user} />} />
+              <Route path="/my-files" element={user ? <MyFiles user={user} /> : <Navigate to="/login" />} />
             </Routes>
           </main>
           <Footer user={user} />
