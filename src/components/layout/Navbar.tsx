@@ -41,7 +41,7 @@ export default function Navbar({ user, onLogout }: NavbarProps) {
             <div className="bg-pink-500 p-2 rounded-lg">
               <Flower2 className="text-white w-8 h-8" />
             </div>
-            <span className="text-2xl font-bold text-pink-600 tracking-tight">Comunidade Bordado Mágico</span>
+            <span className="text-2xl font-bold text-pink-600 tracking-tight">Bordado Mágico</span>
           </Link>
 
           {/* Desktop Menu */}

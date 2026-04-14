@@ -246,17 +246,32 @@ export default function Catalog({ user }: CatalogProps) {
     
     // Subscribe to real-time products from RTDB
     const unsubscribe = storage.subscribeToProducts((rtdbProducts) => {
+      console.log("MATRIZES DO BACKEND (RTDB):", rtdbProducts);
       if (rtdbProducts && rtdbProducts.length > 0) {
         setProducts(rtdbProducts);
-        // Only save to local storage if we actually got data from RTDB
         storage.saveProducts(rtdbProducts);
       } else {
-        // If RTDB is empty, load from local storage
-        const localProducts = storage.getProducts();
-        setProducts(localProducts);
+        setProducts([]);
       }
       setLoading(false);
     });
+
+    // 🔥 Garantir que a vitrine use SOMENTE dados da API (Verificação de arquivos)
+    const fetchFiles = async () => {
+      try {
+        const res = await fetch(API_BASE_URL + "/api/list-embroidery");
+        const data = await res.json();
+        console.log("MATRIZES DA API (GCS):", data.files);
+        
+        if (!data.files) {
+          // Se a API falhar ou não houver arquivos, não fazemos nada drástico aqui 
+          // pois os produtos vêm do RTDB, mas registramos o log.
+        }
+      } catch (err) {
+        console.error("Erro ao verificar arquivos da API:", err);
+      }
+    };
+    fetchFiles();
 
     // Poll for config and favorites (still local for now)
     const interval = setInterval(() => {
@@ -505,13 +520,6 @@ export default function Catalog({ user }: CatalogProps) {
           
           {currentTab === 'catalog' && (
             <div className="flex items-center gap-4 overflow-x-auto pb-2 w-full md:w-auto">
-              <button 
-                onClick={() => setProducts(storage.getProducts())}
-                className="p-3 bg-pink-50 text-pink-600 rounded-full hover:bg-pink-100 transition-all cursor-pointer"
-                title="Atualizar Matrizes"
-              >
-                <RefreshCw size={20} />
-              </button>
               <Filter className="text-pink-500 shrink-0" />
               {categories.map(cat => (
                 <button

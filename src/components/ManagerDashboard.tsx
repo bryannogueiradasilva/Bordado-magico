@@ -66,8 +66,7 @@ export default function ManagerDashboard() {
         setProducts(rtdbProducts);
         storage.saveProducts(rtdbProducts);
       } else {
-        const localProducts = storage.getProducts();
-        setProducts(localProducts);
+        setProducts([]);
       }
       setLoading(false);
     });
@@ -941,22 +940,7 @@ export default function ManagerDashboard() {
             onClick={() => fileInputRef.current?.click()}
             className="bg-pink-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-pink-700 transition-all shadow-lg shadow-pink-100 flex items-center gap-2"
           >
-            <Sparkles size={24} /> Upload Automático
-          </button>
-          <button
-            onClick={handleFullSync}
-            disabled={isSyncing}
-            className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center gap-2 disabled:opacity-50"
-          >
-            <RefreshCw className={cn(isSyncing && "animate-spin")} size={24} />
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar Produção'}
-          </button>
-          <button
-            onClick={() => { setIsAdding(!isAdding); setEditingId(null); setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' }); }}
-            className="bg-purple-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-purple-700 transition-all shadow-lg shadow-purple-100 flex items-center gap-2"
-          >
-            {isAdding ? <X size={24} /> : <Plus size={24} />}
-            {isAdding ? 'Cancelar' : 'Nova Matriz'}
+            <Sparkles size={24} /> Upload de Matrizes
           </button>
         </div>
 

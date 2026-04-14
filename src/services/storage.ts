@@ -89,58 +89,13 @@ export const compressImage = (base64: string, maxWidth = 800, quality = 0.7): Pr
   });
 };
 
-const getInitialProducts = (): Product[] => [
-  {
-    id: '1',
-    name: 'Matriz Floral Delicada',
-    description: 'Um lindo arranjo de flores para toalhas e enxovais.',
-    price: 25.90,
-    imageUrl: 'https://picsum.photos/seed/floral/800/600',
-    category: 'Flores',
-    createdAt: new Date().toISOString(),
-    soldCount: 145,
-    reviews: [
-      { id: 'r1', userName: 'Maria Silva', rating: 5, comment: 'Bordado perfeito, sem falhas!', date: new Date().toISOString() },
-      { id: 'r2', userName: 'Ana Paula', rating: 4, comment: 'Muito bonito, recomendo.', date: new Date().toISOString() }
-    ]
-  },
-  {
-    id: '2',
-    name: 'Ursinho de Pelúcia',
-    description: 'Ideal para enxoval de bebê e mantas infantis.',
-    price: 19.90,
-    imageUrl: 'https://picsum.photos/seed/bear/800/600',
-    category: 'Infantil',
-    createdAt: new Date().toISOString(),
-    soldCount: 89,
-    reviews: [
-      { id: 'r3', userName: 'Carla Souza', rating: 5, comment: 'Ficou lindo no enxoval do meu neto.', date: new Date().toISOString() }
-    ]
-  },
-  {
-    id: '3',
-    name: 'Brasão Clássico',
-    description: 'Elegância para uniformes e itens personalizados.',
-    price: 35.00,
-    imageUrl: 'https://picsum.photos/seed/crest/800/600',
-    category: 'Brasões',
-    createdAt: new Date().toISOString(),
-    soldCount: 56,
-    reviews: []
-  }
-];
-
 export const storage = {
   getUsers: (): User[] => JSON.parse(localStorage.getItem(USERS_KEY) || '[]'),
   saveUsers: (users: User[]) => localStorage.setItem(USERS_KEY, JSON.stringify(users)),
   
   getProducts: (): Product[] => {
     const stored = localStorage.getItem(PRODUCTS_KEY);
-    if (!stored) {
-      const initial = getInitialProducts();
-      localStorage.setItem(PRODUCTS_KEY, JSON.stringify(initial));
-      return initial;
-    }
+    if (!stored) return [];
     const parsed = JSON.parse(stored);
     return parsed.map((p: any) => ({
       ...p,
@@ -294,20 +249,12 @@ export const storage = {
         const products = Array.isArray(data) ? data : Object.values(data);
         callback(products as Product[]);
       } else {
-        // If RTDB is empty, don't clear local state immediately, 
-        // let the component decide or use local storage
         console.log('RTDB products path is empty.');
-        const local = storage.getProducts();
-        if (local.length > 0) {
-          callback(local);
-        } else {
-          callback([]);
-        }
+        callback([]);
       }
     }, (error) => {
       console.error('Error subscribing to products:', error);
-      // Fallback to local storage on error
-      callback(storage.getProducts());
+      callback([]);
     });
   }
 };
