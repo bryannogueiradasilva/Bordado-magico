@@ -205,6 +205,8 @@ const EmbroideryAnimation = () => {
   );
 };
 
+import { API_BASE_URL } from '../config';
+
 export default function Catalog({ user }: CatalogProps) {
   const { setCurrentPageId } = usePresence();
   const navigate = useNavigate();

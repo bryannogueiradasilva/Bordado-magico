@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { storage, Product, fileToBase64, compressImage, Review } from '../services/storage';
 import { analyzeEmbroideryImage, analyzeEmbroideryFilename, generateEmbroideryPreview } from '../services/gemini';
 import { cn } from '../lib/utils';
+import { API_BASE_URL } from '../config';
 
 export default function ManagerDashboard() {
   const generateId = () => {
@@ -11,6 +12,7 @@ export default function ManagerDashboard() {
   };
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'products' | 'users'>('products');
   const [users, setUsers] = useState<any[]>([]);
@@ -93,7 +95,8 @@ export default function ManagerDashboard() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(window.location.origin + '/api/admin/users');
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const response = await fetch(API_BASE_URL + '/api/admin/users');
       const data = await response.json();
       
       if (data.users && data.users.length > 0) {
@@ -138,7 +141,8 @@ export default function ManagerDashboard() {
   const handleUpdateUser = async (uid: string) => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/admin/users/${uid}`, {
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const response = await fetch(API_BASE_URL + `/api/admin/users/${uid}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -221,7 +225,8 @@ export default function ManagerDashboard() {
       for (const client of clientsToDelete) {
         try {
           // 1. Auth Delete
-          const response = await fetch(`/api/admin/users/${client.id}`, { method: 'DELETE' });
+          console.log("🌐 Chamando API:", API_BASE_URL);
+          const response = await fetch(API_BASE_URL + `/api/admin/users/${client.id}`, { method: 'DELETE' });
           const data = await response.json();
           
           if (response.ok) {
@@ -267,7 +272,8 @@ export default function ManagerDashboard() {
       setLoading(true);
       
       // 1. Delete from Firebase Auth via API
-      const response = await fetch(`/api/admin/users/${uid}`, {
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const response = await fetch(API_BASE_URL + `/api/admin/users/${uid}`, {
         method: 'DELETE'
       });
       const data = await response.json();
@@ -300,14 +306,15 @@ export default function ManagerDashboard() {
   const [configured, setConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch(window.location.origin + '/api/gcs-status')
+    console.log("🌐 Chamando API:", API_BASE_URL);
+    fetch(API_BASE_URL + '/api/gcs-status')
       .then(res => res.json())
       .then(data => {
         console.log('🔥 TESTE NOVO:', data.configured);
         setConfigured(data.configured);
         // Se estiver configurado, faz a sincronização automática inicial
         if (data.configured) {
-          syncWithGCS();
+          fetchFiles();
         }
       })
       .catch((err) => {
@@ -315,12 +322,12 @@ export default function ManagerDashboard() {
         setConfigured(false);
       });
 
-    // Sincronização periódica a cada 5 minutos
+    // Sincronização periódica a cada 5 segundos (conforme solicitado)
     const interval = setInterval(() => {
       if (configured) {
-        syncWithGCS();
+        fetchFiles();
       }
-    }, 5 * 60 * 1000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [configured]);
@@ -328,29 +335,35 @@ export default function ManagerDashboard() {
   const [isTransforming, setIsTransforming] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const syncWithGCS = async () => {
+  const fetchFiles = async () => {
     setIsSyncing(true);
     try {
       console.log("🔄 Iniciando sincronização automática...");
-      const res = await fetch(window.location.origin + '/api/list-embroidery');
-      const { files } = await res.json();
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const res = await fetch(API_BASE_URL + '/api/list-embroidery');
+      const data = await res.json();
+      const filesList = data.files || [];
       
-      if (!files) return;
+      // 🔥 ATUALIZA LISTA DE ARQUIVOS RAW
+      setFiles(filesList);
+      
+      if (!filesList) return;
 
       const allProducts = storage.getProducts();
-      const gcsStatusRes = await fetch(window.location.origin + '/api/gcs-status');
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
       const gcsStatusData = await gcsStatusRes.json();
       const bucket = gcsStatusData.bucket || 'appbordados';
 
       // 1. Filter out products that have a gcsPath but the file is no longer in GCS
       let updatedProducts = allProducts.filter(p => {
         if (!p.gcsPath) return true;
-        return files.includes(p.gcsPath);
+        return filesList.includes(p.gcsPath);
       });
 
       // 2. Add products that are in GCS but not in the database
       const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
-      const missingFiles = files.filter((f: string) => !existingGcsPaths.has(f));
+      const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
 
       if (missingFiles.length > 0) {
         console.log(`Sync: Found ${missingFiles.length} new files in GCS. Adding to catalog...`);
@@ -405,35 +418,44 @@ export default function ManagerDashboard() {
   };
 
   const uploadToGCS = async (file: File) => {
+    console.log("📁 FILE REAL:", file);
+    
+    // 🔥 FORÇA criação correta do blob (Studio bug fix)
+    const fixedFile = new File([file], file.name, {
+      type: file.type,
+    });
+
+    console.log("🌐 URL:", API_BASE_URL + "/api/upload-embroidery");
+
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', fixedFile);
 
     try {
-      const response = await fetch(window.location.origin + '/api/upload-embroidery', {
+      const response = await fetch(API_BASE_URL + '/api/upload-embroidery', {
         method: 'POST',
         body: formData,
       });
 
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const result = await response.json();
-        if (!response.ok) {
-          throw new Error(result.error || result.details || 'Falha no upload para o Google Cloud');
-        }
-        return result;
-      } else {
-        const text = await response.text();
-        console.error('Non-JSON response received:', text.substring(0, 200));
-        throw new Error(`Erro no Servidor (${response.status}): O servidor retornou uma resposta inesperada. Verifique se o arquivo não é muito grande.`);
+      // ⚠️ IMPORTANTE: usar text() primeiro (Studio bug)
+      const raw = await response.text();
+      console.log("📦 RESPOSTA RAW:", raw);
+
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (err) {
+        console.error("❌ Erro ao converter JSON:", err);
+        throw new Error("Resposta inválida do servidor");
       }
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || data.details || 'Falha no upload para o Google Cloud');
+      }
+
+      console.log("✅ UPLOAD OK:", data);
+      return data;
     } catch (error: any) {
-      console.error('GCS Upload Error:', error);
-      if (error.name === 'SyntaxError') {
-        throw new Error('Erro de Resposta: O servidor retornou um formato inválido. Tente um arquivo menor ou verifique a conexão.');
-      }
-      if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
-        throw new Error('Erro de Conexão: O servidor não respondeu. O arquivo pode ser muito grande ou o servidor está offline.');
-      }
+      console.error('❌ ERRO UPLOAD:', error);
       throw error;
     }
   };
@@ -723,7 +745,8 @@ export default function ManagerDashboard() {
     // 1. Delete from GCS if it has a gcsPath
     if (productToDelete?.gcsPath) {
       try {
-        await fetch(window.location.origin + '/api/delete-embroidery', {
+        console.log("🌐 Chamando API:", API_BASE_URL);
+        await fetch(API_BASE_URL + '/api/delete-embroidery', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gcsPath: productToDelete.gcsPath })
@@ -740,6 +763,9 @@ export default function ManagerDashboard() {
     storage.syncProductsToRTDB(updatedProducts); // Sync to RTDB
     setProducts(updatedProducts);
     setDeletingId(null);
+
+    // 🔥 ATUALIZA LISTA DEPOIS DE DELETAR
+    await fetchFiles();
   };
 
   const startEdit = (product: Product) => {
@@ -769,9 +795,13 @@ export default function ManagerDashboard() {
     }
   };
 
-  const handleManualFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
+    const files = input.files;
     if (!files || files.length === 0) return;
+
+    const file = files[0];
+    console.log("📁 FILE REAL:", file);
 
     // Concurrency guard
     if (isBulkAdding || isTransforming) {
@@ -784,7 +814,7 @@ export default function ManagerDashboard() {
       const fileList = Array.from(files) as File[];
       
       // Clear input immediately to prevent re-triggering
-      if (e.target) e.target.value = '';
+      if (input) input.value = '';
       
       let matrixFile: File | null = null;
       let imageFile: File | null = null;
@@ -852,6 +882,10 @@ export default function ManagerDashboard() {
             setProducts(storage.getProducts());
             setIsAdding(false);
             setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' });
+            
+            // 🔥 ATUALIZA LISTA DEPOIS DE UPLOAD
+            await fetchFiles();
+            
             alert(`Matriz "${matrixFile.name}" processada e cadastrada automaticamente!`);
           }
         } catch (err) {
@@ -947,7 +981,8 @@ export default function ManagerDashboard() {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      const res = await fetch(window.location.origin + '/api/admin/check-permissions');
+                      console.log("🌐 Chamando API:", API_BASE_URL);
+                      const res = await fetch(API_BASE_URL + '/api/admin/check-permissions');
                       const data = await res.json();
                       if (data.success) {
                         alert("Sucesso! As permissões foram configuradas corretamente.");
@@ -1414,7 +1449,7 @@ export default function ManagerDashboard() {
                       <input
                         type="file"
                         accept=".pes,.jeff,.dst,.exp,.xxx"
-                        onChange={handleManualFileChange}
+                        onChange={handleUpload}
                         className="hidden"
                         id="file-upload"
                       />
@@ -1616,7 +1651,7 @@ export default function ManagerDashboard() {
             <h2 className="text-3xl font-black text-gray-800">Suas Matrizes</h2>
             <div className="flex items-center gap-4">
               <button
-                onClick={syncWithGCS}
+                onClick={fetchFiles}
                 disabled={isSyncing}
                 className={cn(
                   "flex items-center gap-2 px-6 py-2 rounded-full text-sm font-black transition-all shadow-sm border uppercase tracking-widest cursor-pointer",

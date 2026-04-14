@@ -6,6 +6,7 @@ import { Storage } from "@google-cloud/storage";
 import admin from "firebase-admin";
 import multer from "multer";
 import dotenv from "dotenv";
+import cors from "cors";
 
 // Carrega variáveis de ambiente do arquivo .env
 dotenv.config();
@@ -27,6 +28,7 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   // Middlewares básicos para processamento de JSON e formulários
+  app.use(cors({ origin: '*' }));
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -105,6 +107,13 @@ async function startServer() {
   // Upload de nova matriz
   app.post("/api/upload-embroidery", upload.single("file"), async (req: Request, res: Response) => {
     console.log("🚀 Iniciando upload de arquivo...");
+    console.log("📦 FILE COMPLETO:", req.file);
+
+    if (req.file) {
+      console.log("📁 NOME:", req.file.originalname);
+      console.log("📏 SIZE:", req.file.size);
+      console.log("📎 MIME:", req.file.mimetype);
+    }
 
     if (!req.file) {
       console.error("❌ Erro: Nenhum arquivo recebido no req.file");
@@ -124,7 +133,7 @@ async function startServer() {
       });
 
       stream.on("error", (err) => {
-        console.error("❌ Erro no stream de upload GCS:", err.message);
+        console.error("❌ Erro no stream de upload GCS:", err);
         return res.status(500).json({ 
           error: "Erro ao gravar arquivo no Google Cloud Storage",
           details: err.message,

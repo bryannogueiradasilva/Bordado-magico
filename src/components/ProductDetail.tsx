@@ -37,6 +37,8 @@ interface ProductDetailProps {
   user: UserType | null;
 }
 
+import { API_BASE_URL } from '../config';
+
 export default function ProductDetail({ user }: ProductDetailProps) {
   const { setCurrentPageId } = usePresence();
   const { id } = useParams<{ id: string }>();
