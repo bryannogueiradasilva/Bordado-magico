@@ -205,7 +205,7 @@ const EmbroideryAnimation = () => {
   );
 };
 
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, fetchWithTimeout } from '../config';
 
 export default function Catalog({ user }: CatalogProps) {
   const { setCurrentPageId } = usePresence();
@@ -276,7 +276,7 @@ export default function Catalog({ user }: CatalogProps) {
     try {
       const url = API_BASE_URL + "/api/list-embroidery";
       console.log(`🔄 Sincronizando vitrine com a API... URL: ${url}`);
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         cache: "no-store"
       });
       
@@ -285,14 +285,17 @@ export default function Catalog({ user }: CatalogProps) {
       }
       
       const data = await res.json();
-      console.log("FILES:", data.files);
+      console.log("📂 FILES:", data.files);
 
-      const filesList = Array.from(
+      // 🔥 Remove duplicados usando o campo file ou gcsPath como chave
+      const uniqueFiles = Array.from(
         new Map((data.files || []).map((f: any) => {
           const key = typeof f === 'string' ? f : (f.gcsPath || f.file || JSON.stringify(f));
-          return [key, key];
+          return [key, f];
         })).values()
-      ) as string[];
+      );
+
+      const filesList = uniqueFiles.map((f: any) => typeof f === 'string' ? f : (f.gcsPath || f.file)) as string[];
 
       // 1. Busca produtos no Firebase Realtime Database (Fonte de Verdade)
       const rtdbProducts = await storage.getProductsFromRTDB();
@@ -321,7 +324,7 @@ export default function Catalog({ user }: CatalogProps) {
         }
       }
     } catch (err) {
-      console.error("Erro ao sincronizar vitrine:", err);
+      console.error("Erro ao buscar arquivos:", err);
       setProducts([]);
     } finally {
       setLoading(false);

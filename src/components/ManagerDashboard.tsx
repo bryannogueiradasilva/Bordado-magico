@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { storage, Product, fileToBase64, compressImage, Review } from '../services/storage';
 import { analyzeEmbroideryImage, analyzeEmbroideryFilename, generateEmbroideryPreview } from '../services/gemini';
 import { cn } from '../lib/utils';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, fetchWithTimeout } from '../config';
 
 export default function ManagerDashboard() {
   const generateId = () => {
@@ -71,8 +71,9 @@ export default function ManagerDashboard() {
       setLoading(false);
     });
 
-    // 🔥 Carregar clientes apenas via API
+    // 🔥 Carregar clientes e arquivos apenas via API
     fetchUsers();
+    fetchFiles();
 
     return () => {
       unsubscribeProducts();
@@ -283,9 +284,9 @@ export default function ManagerDashboard() {
     setIsSyncing(true);
     try {
       const url = API_BASE_URL + '/api/list-embroidery';
-      console.log(`🔄 Iniciando sincronização total... URL: ${url}`);
+      console.log(`🔄 Sincronizando arquivos... URL: ${url}`);
       
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         cache: "no-store"
       });
       
@@ -294,27 +295,25 @@ export default function ManagerDashboard() {
       }
       
       const data = await res.json();
-      console.log("FILES:", data.files);
+      console.log("📂 FILES:", data.files);
       
-      const filesList = Array.from(
+      // 🔥 Remove duplicados usando o campo file ou gcsPath como chave
+      const uniqueFiles = Array.from(
         new Map((data.files || []).map((f: any) => {
           const key = typeof f === 'string' ? f : (f.gcsPath || f.file || JSON.stringify(f));
-          return [key, key];
+          return [key, f];
         })).values()
-      ) as string[];
+      );
       
+      const filesList = uniqueFiles.map((f: any) => typeof f === 'string' ? f : (f.gcsPath || f.file)) as string[];
       setFiles(filesList);
       
-      if (!filesList) return;
-
       // 1. Busca produtos no Firebase Realtime Database (Fonte de Verdade)
       const rtdbProducts = await storage.getProductsFromRTDB();
       
-      let updatedProducts: Product[] = rtdbProducts;
-
       // 2. Filtra produtos: Remove duplicados e órfãos (que não estão no GCS)
       const uniqueProductsMap = new Map();
-      updatedProducts.forEach(p => {
+      rtdbProducts.forEach(p => {
         if (p.gcsPath && filesList.includes(p.gcsPath)) {
           uniqueProductsMap.set(p.gcsPath, p);
         } else if (!p.gcsPath) {
@@ -328,34 +327,30 @@ export default function ManagerDashboard() {
       setProducts(finalProducts);
       
       // Sincroniza de volta se houver mudanças (limpeza de órfãos)
-      if (finalProducts.length !== updatedProducts.length) {
+      if (finalProducts.length !== rtdbProducts.length) {
         await storage.syncProductsToRTDB(finalProducts);
       }
     } catch (error) {
-      console.error("Sync Error:", error);
+      console.error("Erro ao buscar arquivos:", error);
     } finally {
       setIsSyncing(false);
     }
   };
 
   const uploadToGCS = async (file: File, imageFile?: File) => {
-    console.log("📁 FILE REAL:", file);
+    console.log("📁 FILE:", file);
     
-    // 🔥 FORÇA criação correta do blob (Studio bug fix)
-    const fixedFile = new File([file], file.name, {
-      type: file.type,
-    });
-
-    console.log("🌐 URL:", API_BASE_URL + "/api/upload-embroidery");
-
     const formData = new FormData();
-    formData.append('file', fixedFile);
+    formData.append('file', file);
     if (imageFile) {
       formData.append('image', imageFile);
     }
 
     try {
-      const response = await fetch(API_BASE_URL + '/api/upload-embroidery', {
+      const url = API_BASE_URL + '/api/upload-embroidery';
+      console.log("🌐 URL:", url);
+
+      const response = await fetchWithTimeout(url, {
         method: 'POST',
         body: formData,
       });
