@@ -239,23 +239,6 @@ export default function Catalog({ user }: CatalogProps) {
     }
   }, [user, pendingAction]);
 
-  const [files, setFiles] = useState<{name: string, url: string}[]>([]);
-
-  const fetchFiles = async () => {
-    try {
-      const res = await fetch(API_BASE_URL + "/api/list-embroidery");
-      const data = await res.json();
-      setFiles(data.files || []);
-      console.log("Arquivos públicos carregados:", data.files);
-    } catch (err) {
-      console.error("Erro ao carregar arquivos públicos:", err);
-    }
-  };
-
-  useEffect(() => {
-    fetchFiles();
-  }, []);
-
   useEffect(() => {
     // Load config and favorites locally
     setConfig(storage.getConfig());
@@ -892,48 +875,6 @@ export default function Catalog({ user }: CatalogProps) {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Galeria Pública Direta (GCS) - Conforme solicitado */}
-      {files.length > 0 && (
-        <section className="mt-20 pt-20 border-t border-pink-100">
-          <div className="flex items-center gap-3 mb-8">
-            <Shield className="text-pink-500" size={32} />
-            <h2 className="text-3xl font-black text-gray-900">Galeria Pública Direta</h2>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            {files.map((file, idx) => (
-              <motion.div 
-                key={idx}
-                initial={{ opacity: 0 }}
-                whileInView={{ opacity: 1 }}
-                className="aspect-square bg-white rounded-2xl border border-pink-50 overflow-hidden shadow-sm hover:shadow-md transition-all group relative"
-              >
-                <img 
-                  src={file.url} 
-                  alt={file.name} 
-                  className="w-full h-full object-contain p-2"
-                  referrerPolicy="no-referrer"
-                  onError={(e) => {
-                    // Fallback para ícone se a imagem não carregar (pode ser um arquivo de matriz real e não imagem)
-                    (e.target as HTMLImageElement).src = "https://placehold.co/400x400/fdf2f8/ec4899?text=Matriz";
-                  }}
-                />
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-2 text-center">
-                  <p className="text-white text-[10px] font-bold truncate w-full">{file.name}</p>
-                  <a 
-                    href={file.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="mt-2 bg-white text-pink-600 px-3 py-1 rounded-full text-[10px] font-black uppercase"
-                  >
-                    Ver Arquivo
-                  </a>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
