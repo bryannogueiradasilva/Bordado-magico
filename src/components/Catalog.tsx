@@ -522,135 +522,152 @@ export default function Catalog({ user }: CatalogProps) {
       </div>
 
       {/* Product Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {filteredProducts.map(product => (
-          <motion.div
-            key={product.id}
-            layout
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white rounded-[40px] overflow-hidden shadow-xl border border-pink-50 group hover:shadow-2xl transition-all"
-          >
-            <Link 
-              to={`/product/${product.id}`} 
-              className="relative h-64 bg-gray-50 flex items-center justify-center overflow-hidden cursor-pointer block group"
-            >
-              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-              {product.imageUrl ? (
-                <img 
-                  src={product.imageUrl} 
-                  alt={product.name}
-                  className="w-full h-full object-contain p-4 group-hover:scale-110 transition-transform duration-500 relative z-10"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center text-purple-300 group-hover:scale-110 transition-transform duration-500 relative z-10">
-                  <Flower2 size={80} strokeWidth={1} />
-                  <p className="mt-4 font-mono text-xs uppercase tracking-widest text-purple-400">Matriz Técnica</p>
-                  <p className="text-[10px] font-mono text-purple-300 mt-1">{product.fileName || 'Arquivo de Bordado'}</p>
-                </div>
-              )}
-              <div className="absolute top-4 left-4 z-20">
-                <button 
-                  onClick={(e) => { 
-                    e.preventDefault(); 
-                    e.stopPropagation(); 
-                    setZoomProduct(product);
-                  }}
-                  className="p-3 bg-white/90 text-gray-700 rounded-full shadow-md hover:bg-white transition-all cursor-pointer flex items-center gap-2"
-                  title="Zoom nos pontos"
+      <div className="min-h-[400px]">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <RefreshCw className="w-12 h-12 text-pink-500 animate-spin mb-4" />
+            <p className="text-gray-500 font-bold animate-pulse">Carregando matrizes mágicas...</p>
+          </div>
+        ) : filteredProducts.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {filteredProducts.map(product => (
+              <motion.div
+                key={product.id}
+                layout
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-white rounded-[40px] overflow-hidden shadow-xl border border-pink-50 group hover:shadow-2xl transition-all"
+              >
+                <Link 
+                  to={`/product/${product.id}`} 
+                  className="relative h-64 bg-gray-50 flex items-center justify-center overflow-hidden cursor-pointer block group"
                 >
-                  <Search size={20} />
-                  <span className="text-sm font-bold">Zoom</span>
-                </button>
-              </div>
-              <div className="absolute top-4 right-4 z-20">
-                <button 
-                  onClick={(e) => { 
-                    e.preventDefault(); 
-                    e.stopPropagation(); 
-                    handleToggleFavorite(product.id);
-                  }}
-                  className={cn(
-                    "p-3 rounded-full shadow-md transition-all cursor-pointer",
-                    favorites.includes(product.id)
-                      ? "bg-pink-500 text-white"
-                      : "bg-white/90 text-pink-500 hover:bg-pink-500 hover:text-white"
+                  <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
+                  {product.imageUrl ? (
+                    <img 
+                      src={product.imageUrl} 
+                      alt={product.name}
+                      className="w-full h-full object-contain p-4 group-hover:scale-110 transition-transform duration-500 relative z-10"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-purple-300 group-hover:scale-110 transition-transform duration-500 relative z-10">
+                      <Flower2 size={80} strokeWidth={1} />
+                      <p className="mt-4 font-mono text-xs uppercase tracking-widest text-purple-400">Matriz Técnica</p>
+                      <p className="text-[10px] font-mono text-purple-300 mt-1">{product.fileName || 'Arquivo de Bordado'}</p>
+                    </div>
                   )}
-                >
-                  <Heart size={24} fill={favorites.includes(product.id) ? "currentColor" : "none"} />
-                </button>
-              </div>
-              <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-2">
-                <span className="bg-pink-500 text-white px-4 py-1 rounded-full font-bold text-sm">
-                  {product.category}
-                </span>
-                <span className="bg-white/90 text-pink-600 px-3 py-1 rounded-full font-black text-[10px] uppercase tracking-tighter shadow-sm flex items-center gap-1">
-                  <CheckCircle2 size={10} />
-                  Fidelidade Técnica
-                </span>
-              </div>
-            </Link>
-            <div className="p-6 md:p-8">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xl md:text-2xl font-bold text-gray-800 truncate">{product.name}</h3>
-                <div className="flex items-center gap-1 bg-green-50 text-green-700 px-2 md:px-3 py-1 rounded-full text-[10px] md:text-xs font-black border border-green-100 shrink-0">
-                  <TrendingUp size={10} className="md:w-3 md:h-3" />
-                  {product.soldCount || 0}
-                </div>
-              </div>
-              
-              <div className="flex items-center gap-1 mb-4">
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <Star 
-                    key={s} 
-                    size={12} 
-                    className={cn(
-                      "fill-current",
-                      s <= ((product.reviews || []).reduce((acc, r) => acc + r.rating, 0) / (product.reviews?.length || 1))
-                        ? "text-yellow-400" 
-                        : "text-gray-200"
-                    )} 
-                  />
-                ))}
-                <span className="text-[10px] text-gray-400 font-bold ml-1">({product.reviews?.length || 0})</span>
-              </div>
+                  <div className="absolute top-4 left-4 z-20">
+                    <button 
+                      onClick={(e) => { 
+                        e.preventDefault(); 
+                        e.stopPropagation(); 
+                        setZoomProduct(product);
+                      }}
+                      className="p-3 bg-white/90 text-gray-700 rounded-full shadow-md hover:bg-white transition-all cursor-pointer flex items-center gap-2"
+                      title="Zoom nos pontos"
+                    >
+                      <Search size={20} />
+                      <span className="text-sm font-bold">Zoom</span>
+                    </button>
+                  </div>
+                  <div className="absolute top-4 right-4 z-20">
+                    <button 
+                      onClick={(e) => { 
+                        e.preventDefault(); 
+                        e.stopPropagation(); 
+                        handleToggleFavorite(product.id);
+                      }}
+                      className={cn(
+                        "p-3 rounded-full shadow-md transition-all cursor-pointer",
+                        favorites.includes(product.id)
+                          ? "bg-pink-500 text-white"
+                          : "bg-white/90 text-pink-500 hover:bg-pink-500 hover:text-white"
+                      )}
+                    >
+                      <Heart size={24} fill={favorites.includes(product.id) ? "currentColor" : "none"} />
+                    </button>
+                  </div>
+                  <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-2">
+                    <span className="bg-pink-500 text-white px-4 py-1 rounded-full font-bold text-sm">
+                      {product.category}
+                    </span>
+                    <span className="bg-white/90 text-pink-600 px-3 py-1 rounded-full font-black text-[10px] uppercase tracking-tighter shadow-sm flex items-center gap-1">
+                      <CheckCircle2 size={10} />
+                      Fidelidade Técnica
+                    </span>
+                  </div>
+                </Link>
+                <div className="p-6 md:p-8">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xl md:text-2xl font-bold text-gray-800 truncate">{product.name}</h3>
+                    <div className="flex items-center gap-1 bg-green-50 text-green-700 px-2 md:px-3 py-1 rounded-full text-[10px] md:text-xs font-black border border-green-100 shrink-0">
+                      <TrendingUp size={10} className="md:w-3 md:h-3" />
+                      {product.soldCount || 0}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-1 mb-4">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star 
+                        key={s} 
+                        size={12} 
+                        className={cn(
+                          "fill-current",
+                          s <= ((product.reviews || []).reduce((acc, r) => acc + r.rating, 0) / (product.reviews?.length || 1))
+                            ? "text-yellow-400" 
+                            : "text-gray-200"
+                        )} 
+                      />
+                    ))}
+                    <span className="text-[10px] text-gray-400 font-bold ml-1">({product.reviews?.length || 0})</span>
+                  </div>
 
-              <p className="text-gray-500 text-sm md:text-lg mb-6 line-clamp-2 h-10 md:h-14">{product.description}</p>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-2xl md:text-3xl font-black text-pink-600 whitespace-nowrap">
-                  R$ {product.price.toFixed(2)}
-                </span>
-                {userPurchasedIds.includes(product.id) ? (
-                  <button 
-                    onClick={() => handleDownload(product)}
-                    disabled={isDownloading}
-                    className="px-4 md:px-8 py-3 md:py-4 bg-green-500 text-white rounded-xl md:rounded-2xl text-base md:text-xl font-bold shadow-lg hover:bg-green-600 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <Download size={20} className="md:w-6 md:h-6" />
-                    <span className="hidden sm:inline">{isDownloading ? `Baixando... ${downloadProgress}%` : 'Baixar'}</span>
-                    <span className="sm:hidden">{isDownloading ? `${downloadProgress}%` : 'Baixar'}</span>
-                  </button>
-                ) : (
-                  <button 
-                    onClick={() => handleBuy(product)}
-                    disabled={!config.buttonsEnabled}
-                    className={cn(
-                      "px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl text-base md:text-xl font-bold shadow-lg active:scale-95 transition-all flex items-center gap-2",
-                      config.buttonsEnabled 
-                        ? 'bg-pink-500 text-white hover:bg-pink-600 cursor-pointer' 
-                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  <p className="text-gray-500 text-sm md:text-lg mb-6 line-clamp-2 h-10 md:h-14">{product.description}</p>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-2xl md:text-3xl font-black text-pink-600 whitespace-nowrap">
+                      R$ {product.price.toFixed(2)}
+                    </span>
+                    {userPurchasedIds.includes(product.id) ? (
+                      <button 
+                        onClick={() => handleDownload(product)}
+                        disabled={isDownloading}
+                        className="px-4 md:px-8 py-3 md:py-4 bg-green-500 text-white rounded-xl md:rounded-2xl text-base md:text-xl font-bold shadow-lg hover:bg-green-600 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <Download size={20} className="md:w-6 md:h-6" />
+                        <span className="hidden sm:inline">{isDownloading ? `Baixando... ${downloadProgress}%` : 'Baixar'}</span>
+                        <span className="sm:hidden">{isDownloading ? `${downloadProgress}%` : 'Baixar'}</span>
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => handleBuy(product)}
+                        disabled={!config.buttonsEnabled}
+                        className={cn(
+                          "px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl text-base md:text-xl font-bold shadow-lg active:scale-95 transition-all flex items-center gap-2",
+                          config.buttonsEnabled 
+                            ? 'bg-pink-500 text-white hover:bg-pink-600 cursor-pointer' 
+                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        )}
+                      >
+                        {config.buttonsEnabled ? <ShoppingCart size={20} className="md:w-6 md:h-6" /> : <AlertTriangle size={20} className="md:w-6 md:h-6" />}
+                        <span className="hidden sm:inline">{config.buttonsEnabled ? 'Comprar' : 'Indisponível'}</span>
+                        <span className="sm:hidden">{config.buttonsEnabled ? 'Comprar' : 'Off'}</span>
+                      </button>
                     )}
-                  >
-                    {config.buttonsEnabled ? <ShoppingCart size={20} className="md:w-6 md:h-6" /> : <AlertTriangle size={20} className="md:w-6 md:h-6" />}
-                    <span className="hidden sm:inline">{config.buttonsEnabled ? 'Comprar' : 'Indisponível'}</span>
-                    <span className="sm:hidden">{config.buttonsEnabled ? 'Comprar' : 'Off'}</span>
-                  </button>
-                )}
-              </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-32 bg-white rounded-[50px] shadow-inner border-2 border-dashed border-pink-100">
+            <div className="bg-pink-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Flower2 size={48} className="text-pink-200" />
             </div>
-          </motion.div>
-        ))}
+            <h3 className="text-2xl font-black text-gray-800 mb-2">Nenhuma matriz encontrada</h3>
+            <p className="text-gray-500 font-bold">Tente buscar por outro termo ou categoria.</p>
+          </div>
+        )}
       </div>
 
       {/* Zoom Modal */}

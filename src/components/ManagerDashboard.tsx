@@ -468,6 +468,12 @@ export default function ManagerDashboard() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Concurrency guard
+    if (isTransforming || isBulkAdding) {
+      console.warn("Aguarde o processamento do arquivo...");
+      return;
+    }
+
     // Validation
     if (!formData.name || !formData.price || !formData.category) {
       alert('Por favor, preencha todos os campos obrigatórios (Nome, Preço e Categoria).');
@@ -596,16 +602,17 @@ export default function ManagerDashboard() {
     const files = input.files;
     if (!files || files.length === 0) return;
 
-    const file = files[0];
-    console.log("📁 FILE REAL:", file);
-
-    // Concurrency guard
+    // Concurrency guard - Move to the very beginning
     if (isBulkAdding || isTransforming) {
       console.warn("Já existe um processamento em andamento.");
       return;
     }
 
+    const file = files[0];
+    console.log("📁 FILE REAL:", file);
+
     setLoading(true);
+    setIsTransforming(true); // Set early
     try {
       const fileList = Array.from(files) as File[];
       
@@ -627,7 +634,6 @@ export default function ManagerDashboard() {
       const updates: any = {};
 
       if (matrixFile) {
-        setIsTransforming(true);
         try {
           // 1. Upload to GCS
           const uploadResult = await uploadToGCS(matrixFile);
@@ -795,9 +801,14 @@ export default function ManagerDashboard() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="bg-pink-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-pink-700 transition-all shadow-lg shadow-pink-100 flex items-center gap-2"
+            disabled={isBulkAdding || isTransforming}
+            className={cn(
+              "bg-pink-600 text-white px-8 py-4 rounded-2xl font-black transition-all shadow-lg shadow-pink-100 flex items-center gap-2",
+              (isBulkAdding || isTransforming) ? "opacity-50 cursor-not-allowed" : "hover:bg-pink-700"
+            )}
           >
-            <Sparkles size={24} /> Upload de Matrizes
+            {isBulkAdding ? <RefreshCw className="animate-spin" size={24} /> : <Sparkles size={24} />}
+            {isBulkAdding ? 'Processando Lote...' : 'Upload de Matrizes'}
           </button>
         </div>
 
@@ -1231,9 +1242,22 @@ export default function ManagerDashboard() {
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-purple-600 text-white px-8 py-4 rounded-2xl font-black hover:bg-purple-700 transition-all shadow-lg shadow-purple-100 uppercase tracking-widest"
+                  disabled={isTransforming || isBulkAdding}
+                  className={cn(
+                    "flex-1 px-8 py-4 rounded-2xl font-black transition-all shadow-lg uppercase tracking-widest",
+                    isTransforming || isBulkAdding
+                      ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                      : "bg-purple-600 text-white hover:bg-purple-700 shadow-purple-100"
+                  )}
                 >
-                  {editingId ? 'Salvar Alterações' : 'Confirmar Cadastro'}
+                  {isTransforming ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw className="animate-spin" size={20} />
+                      <span>Processando...</span>
+                    </div>
+                  ) : (
+                    editingId ? 'Salvar Alterações' : 'Confirmar Cadastro'
+                  )}
                 </button>
               </div>
             </form>
