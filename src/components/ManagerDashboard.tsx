@@ -12,7 +12,6 @@ export default function ManagerDashboard() {
   };
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'products' | 'users'>('products');
   const [users, setUsers] = useState<any[]>([]);
@@ -215,119 +214,8 @@ export default function ManagerDashboard() {
   };
 
   const [showUserPassword, setShowUserPassword] = useState(false);
-  const [configured, setConfigured] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    console.log("🌐 Chamando API:", API_BASE_URL);
-    fetch(API_BASE_URL + '/api/gcs-status')
-      .then(res => res.json())
-      .then(data => {
-        console.log('🔥 TESTE NOVO:', data.configured);
-        setConfigured(data.configured);
-        // Se estiver configurado, faz a sincronização automática inicial
-        if (data.configured) {
-          fetchFiles();
-        }
-      })
-      .catch((err) => {
-        console.error('ERRO API:', err); // 🔥 IMPORTANTE
-        setConfigured(false);
-      });
-
-    // Sincronização periódica a cada 5 segundos (conforme solicitado)
-    const interval = setInterval(() => {
-      if (configured) {
-        fetchFiles();
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [configured]);
 
   const [isTransforming, setIsTransforming] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  const fetchFiles = async () => {
-    setIsSyncing(true);
-    try {
-      console.log("🔄 Iniciando sincronização automática...");
-      console.log("🌐 Chamando API:", API_BASE_URL);
-      const res = await fetch(API_BASE_URL + '/api/list-embroidery');
-      const data = await res.json();
-      const filesList = data.files || [];
-      
-      // 🔥 ATUALIZA LISTA DE ARQUIVOS RAW
-      setFiles(filesList);
-      
-      if (!filesList) return;
-
-      const allProducts = storage.getProducts();
-      console.log("🌐 Chamando API:", API_BASE_URL);
-      const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
-      const gcsStatusData = await gcsStatusRes.json();
-      const bucket = gcsStatusData.bucket || 'appbordados';
-
-      // 1. Filter out products that have a gcsPath but the file is no longer in GCS
-      let updatedProducts = allProducts.filter(p => {
-        if (!p.gcsPath) return true;
-        return filesList.includes(p.gcsPath);
-      });
-
-      // 2. Add products that are in GCS but not in the database
-      const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
-      const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
-
-      if (missingFiles.length > 0) {
-        console.log(`Sync: Found ${missingFiles.length} new files in GCS. Adding to catalog...`);
-        
-        for (const file of missingFiles) {
-          const fileName = file.split('/').pop() || file;
-          const baseName = fileName.split('.').shift() || fileName;
-          
-          // AI Analysis of filename for better metadata
-          let analysis = null;
-          try {
-            analysis = await analyzeEmbroideryFilename(fileName) as any;
-          } catch (e) {
-            console.warn("AI analysis failed for synced file:", fileName);
-          }
-
-          const newProduct: Product = {
-            id: generateId(),
-            name: analysis?.name || baseName,
-            description: analysis?.description || `Matriz de bordado sincronizada: ${fileName}`,
-            price: 19.90,
-            imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${baseName}.png`,
-            fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
-            fileName: fileName,
-            gcsPath: file,
-            category: analysis?.category || 'Sincronizado',
-            createdAt: new Date().toISOString(),
-            soldCount: 0,
-            reviews: []
-          };
-          updatedProducts.push(newProduct);
-        }
-      }
-
-      if (updatedProducts.length !== allProducts.length || missingFiles.length > 0) {
-        console.log(`Sync complete: ${updatedProducts.length} products total.`);
-        storage.saveProducts(updatedProducts);
-        setProducts(updatedProducts);
-        
-        // Sync to RTDB if possible
-        try {
-          await storage.syncProductsToRTDB(updatedProducts);
-        } catch (e) {
-          console.warn("Could not sync updated list to RTDB during auto-sync:", e);
-        }
-      }
-    } catch (error) {
-      console.error("Sync Error:", error);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   const uploadToGCS = async (file: File) => {
     console.log("📁 FILE REAL:", file);
@@ -373,7 +261,6 @@ export default function ManagerDashboard() {
   };
 
   const handleFullSync = async () => {
-    setIsSyncing(true);
     try {
       const localProducts = storage.getProducts();
       await storage.syncProductsToRTDB(localProducts);
@@ -387,8 +274,6 @@ export default function ManagerDashboard() {
       } else {
         alert('Erro ao sincronizar. Verifique sua conexão e permissões (E-mail verificado e login oficial são necessários).');
       }
-    } finally {
-      setIsSyncing(false);
     }
   };
 
@@ -677,9 +562,6 @@ export default function ManagerDashboard() {
     storage.syncProductsToRTDB(updatedProducts); // Sync to RTDB
     setProducts(updatedProducts);
     setDeletingId(null);
-
-    // 🔥 ATUALIZA LISTA DEPOIS DE DELETAR
-    await fetchFiles();
   };
 
   const startEdit = (product: Product) => {
@@ -797,9 +679,6 @@ export default function ManagerDashboard() {
             setIsAdding(false);
             setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' });
             
-            // 🔥 ATUALIZA LISTA DEPOIS DE UPLOAD
-            await fetchFiles();
-            
             alert(`Matriz "${matrixFile.name}" processada e cadastrada automaticamente!`);
           }
         } catch (err) {
@@ -829,29 +708,7 @@ export default function ManagerDashboard() {
     }
   };
 
-  if (configured === null) return null;
-
-  if (!configured) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-pink-50 p-4">
-        <div className="bg-white p-8 rounded-3xl shadow-xl border-2 border-pink-100 text-center max-w-md">
-          <div className="bg-pink-100 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 text-pink-600">
-            <AlertTriangle size={32} />
-          </div>
-          <h2 className="text-2xl font-black text-gray-800 mb-2">Google Cloud não configurado</h2>
-          <p className="text-gray-600 font-bold mb-6">
-            O sistema de armazenamento de arquivos não foi detectado. Por favor, configure as credenciais no painel de controle.
-          </p>
-          <button 
-            onClick={() => window.open('https://console.cloud.google.com/iam-admin/serviceaccounts', '_blank')}
-            className="w-full bg-pink-600 text-white py-4 rounded-2xl font-black hover:bg-pink-700 transition-all shadow-lg shadow-pink-100"
-          >
-            Configurar Agora
-          </button>
-        </div>
-      </div>
-    );
-  }
+  if (loading && products.length === 0) return null;
 
   return (
     <div className="max-w-6xl mx-auto px-4 space-y-8 pb-20">
@@ -1549,19 +1406,6 @@ export default function ManagerDashboard() {
           <div className="p-8 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
             <h2 className="text-3xl font-black text-gray-800">Suas Matrizes</h2>
             <div className="flex items-center gap-4">
-              <button
-                onClick={fetchFiles}
-                disabled={isSyncing}
-                className={cn(
-                  "flex items-center gap-2 px-6 py-2 rounded-full text-sm font-black transition-all shadow-sm border uppercase tracking-widest cursor-pointer",
-                  isSyncing 
-                    ? "bg-gray-100 text-gray-300 border-gray-100" 
-                    : "bg-white text-pink-600 border-pink-100 hover:bg-pink-50"
-                )}
-              >
-                <RefreshCw size={16} className={cn(isSyncing && "animate-spin")} />
-                {isSyncing ? 'Sincronizando...' : 'Sincronizar'}
-              </button>
               <span className="bg-white px-6 py-2 rounded-full text-sm font-black text-gray-400 shadow-sm border border-gray-100 uppercase tracking-widest">
                 {products.length} itens
               </span>
