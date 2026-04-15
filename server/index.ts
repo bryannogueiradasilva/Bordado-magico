@@ -7,45 +7,12 @@ import admin from "firebase-admin";
 import multer from "multer";
 import dotenv from "dotenv";
 import cors from "cors";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Carrega variáveis de ambiente do arquivo .env
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Inicializa Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
-async function analyzeImageWithAI(base64Image: string, mimeType: string) {
-  try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const prompt = "Analise essa imagem de bordado e responda exatamente neste formato:\nNome: ...\nCategoria: ...\nDescrição: ... (persuasiva para bordadeiras)";
-    
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: base64Image,
-          mimeType: mimeType
-        }
-      }
-    ]);
-    
-    const text = result.response.text();
-    console.log("🤖 IA Resposta:", text);
-    
-    return {
-      name: text.match(/Nome:\s*(.*)/i)?.[1]?.trim(),
-      category: text.match(/Categoria:\s*(.*)/i)?.[1]?.trim(),
-      description: text.match(/Descrição:\s*([\s\S]*)/i)?.[1]?.trim()
-    };
-  } catch (error) {
-    console.error("❌ Erro na análise da IA:", error);
-    return null;
-  }
-}
 
 /**
  * CONFIGURAÇÃO DO BACKEND (EXPRESS)
@@ -61,11 +28,7 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   // Middlewares básicos para processamento de JSON e formulários
-  app.use(cors({
-    origin: "*",
-    methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type"]
-  }));
+  app.use(cors({ origin: '*' }));
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -124,132 +87,58 @@ async function startServer() {
     }
   });
 
-  // Upload de nova matriz com análise de IA
-  app.post("/api/upload-embroidery", upload.fields([{ name: 'file', maxCount: 1 }, { name: 'image', maxCount: 1 }]), async (req: Request, res: Response) => {
-    console.log("🚀 Iniciando upload inteligente...");
-    
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const matrixFile = files?.['file']?.[0];
-    const imageFile = files?.['image']?.[0];
+  // Upload de nova matriz
+  app.post("/api/upload-embroidery", upload.single("file"), async (req: Request, res: Response) => {
+    console.log("🚀 Iniciando upload de arquivo...");
+    console.log("📦 FILE COMPLETO:", req.file);
 
-    if (!matrixFile) {
-      return res.status(400).json({ error: "Arquivo de matriz (.pes, .dst, etc) é obrigatório" });
+    if (req.file) {
+      console.log("📁 NOME:", req.file.originalname);
+      console.log("📏 SIZE:", req.file.size);
+      console.log("📎 MIME:", req.file.mimetype);
+    }
+
+    if (!req.file) {
+      console.error("❌ Erro: Nenhum arquivo recebido no req.file");
+      return res.status(400).json({ error: "Nenhum arquivo enviado" });
     }
 
     try {
       const gcs = getStorage();
-      const bucket = gcs.bucket(bucketName);
+      const fileName = `arquivos-matrizes/${Date.now()}-${req.file.originalname}`;
+      const blob = gcs.bucket(bucketName).file(fileName);
       
-      // 1. Verificar se arquivo já existe (Duplicação exata de caminho)
-      const existingFileName = `arquivos-matrizes/${matrixFile.originalname}`;
-      const [exists] = await bucket.file(existingFileName).exists();
-      
-      if (exists) {
-        console.log("⚠️ Arquivo já existe no GCS.");
-        return res.json({ error: "Arquivo já existe" });
-      }
+      console.log(`📤 Fazendo upload para: ${fileName}`);
 
-      let aiData = null;
-      try {
-        if (imageFile) {
-          console.log("🤖 Analisando imagem com IA...");
-          const base64 = imageFile.buffer.toString('base64');
-          aiData = await analyzeImageWithAI(base64, imageFile.mimetype);
-        }
-      } catch (err) {
-        console.error("❌ Erro IA:", err);
-      }
-
-      if (!aiData || !aiData.name) {
-        console.warn("⚠️ IA falhou ou não retornou dados. Usando fallback seguro.");
-        const baseName = path.parse(matrixFile.originalname).name.replace(/[-_]/g, ' ');
-        aiData = {
-          name: baseName || "design bordado",
-          category: "Geral",
-          description: `✨ Matriz de bordado "${baseName || 'de alta qualidade'}" pronta para uso.`
-        };
-      }
-
-      // 2. Upload da Matriz
-      const blob = bucket.file(existingFileName);
       const stream = blob.createWriteStream({ 
         resumable: false, 
-        contentType: matrixFile.mimetype 
+        contentType: req.file.mimetype 
       });
 
       stream.on("error", (err) => {
         console.error("❌ Erro no stream de upload GCS:", err);
-        return res.status(500).json({ error: "Erro ao gravar arquivo no GCS" });
-      });
-
-      stream.on("finish", async () => {
-        const publicUrl = `https://storage.googleapis.com/${bucketName}/${existingFileName}`;
-        const baseName = path.parse(existingFileName).name;
-        const previewUrl = `https://storage.googleapis.com/${bucketName}/imagens-vitrine/${baseName}.png`;
-
-        console.log("✅ Upload concluído com sucesso!");
-
-        // 3. Salvar metadados no Firebase Realtime Database
-        // Garantir nome único no banco de dados
-        const adminApp = getFirebaseAdmin();
-        const db = adminApp.database();
-        const productsRef = db.ref('products');
-        
-        const snapshot = await productsRef.get();
-        let existingNames: string[] = [];
-        if (snapshot.exists()) {
-          const products = Object.values(snapshot.val() as Record<string, any>);
-          existingNames = products.map(p => p.name);
-        }
-
-        let uniqueName = aiData!.name!;
-        let count = 1;
-        while (existingNames.includes(uniqueName)) {
-          uniqueName = `${aiData!.name} ${count}`;
-          count++;
-        }
-
-        const finalMetadata = {
-          name: uniqueName,
-          category: aiData!.category || "Geral",
-          description: aiData!.description || `✨ Matriz de bordado "${uniqueName}" perfeita para seus projetos!`,
-          fileUrl: publicUrl,
-          imageUrl: previewUrl,
-          fileName: matrixFile.originalname,
-          gcsPath: existingFileName,
-          createdAt: Date.now(),
-          price: 19.90,
-          soldCount: 0,
-          reviews: []
-        };
-
-        const newProductRef = productsRef.push();
-        const finalProduct = {
-          id: newProductRef.key,
-          ...finalMetadata
-        };
-
-        try {
-          await newProductRef.set(finalProduct);
-          console.log("✅ Metadados salvos no Firebase RTDB");
-        } catch (dbError) {
-          console.error("❌ Erro ao salvar metadados no Firebase:", dbError);
-        }
-
-        console.log("✅ UPLOAD OK:", finalProduct);
-
-        return res.json({
-          success: true,
-          file: finalProduct,
-          gcsPath: existingFileName,
-          publicUrl,
-          previewUrl,
-          aiData: { ...aiData, name: uniqueName },
-          isDuplicate: false
+        return res.status(500).json({ 
+          error: "Erro ao gravar arquivo no Google Cloud Storage",
+          details: err.message,
+          bucket: bucketName
         });
       });
 
-      stream.end(matrixFile.buffer);
+      stream.on("finish", () => {
+        const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
+        const baseName = path.parse(fileName).name;
+        const previewUrl = `https://storage.googleapis.com/${bucketName}/imagens-vitrine/${baseName}.png`;
+
+        console.log("✅ Upload concluído com sucesso!");
+        return res.json({
+          success: true,
+          gcsPath: fileName,
+          publicUrl,
+          previewUrl
+        });
+      });
+
+      stream.end(req.file.buffer);
     } catch (error: any) {
       console.error("❌ Erro fatal no upload:", error.message);
       return res.status(500).json({ error: error.message });

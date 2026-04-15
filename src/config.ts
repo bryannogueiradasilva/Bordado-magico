@@ -12,21 +12,25 @@ export const API_BASE_URL =
     : "https://remix-bordado-m-gico-matrizes-de-bordado-267339025814.us-west1.run.app";
 
 /**
- * Helper para chamadas fetch com timeout para evitar travamentos.
+ * Helper para chamadas fetch que garante o tratamento correto de JSON
+ * e logs de debug necessários.
  */
-export const fetchWithTimeout = async (url: string, options: RequestInit, timeout = 20000) => {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
+export async function apiFetch(endpoint: string, options: RequestInit = {}) {
+  const url = API_BASE_URL + endpoint;
   
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
+  // Log de debug para monitorar as chamadas
+  console.log(`🌐 API CALL: ${url}`, options.method || 'GET');
+
+  const response = await fetch(url, options);
+  
+  // Verifica se a resposta é JSON antes de tentar parsear
+  const contentType = response.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    const data = await response.json();
+    return { data, ok: response.ok, status: response.status };
   }
-};
+  
+  // Se não for JSON, retorna o texto para debug
+  const text = await response.text();
+  return { data: text, ok: response.ok, status: response.status, isText: true };
+}

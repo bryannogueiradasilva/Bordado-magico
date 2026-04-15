@@ -205,12 +205,17 @@ const EmbroideryAnimation = () => {
   );
 };
 
-import { API_BASE_URL, fetchWithTimeout } from '../config';
+import { API_BASE_URL } from '../config';
 
 export default function Catalog({ user }: CatalogProps) {
   const { setCurrentPageId } = usePresence();
   const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
+  
+  useEffect(() => {
+    setCurrentPageId('home');
+    return () => setCurrentPageId(null);
+  }, [setCurrentPageId]);
   const [config, setConfig] = useState<AppConfig>({ buttonsEnabled: true });
   const [searchTerm, setSearchTerm] = useState('');
   const [category, setCategory] = useState('Todas');
@@ -233,111 +238,12 @@ export default function Catalog({ user }: CatalogProps) {
       setPendingAction(null);
     }
   }, [user, pendingAction]);
-  
-  const generateName = (fileName: string) => {
-    return fileName
-      .replace(/\.[^/.]+$/, "")
-      .replace(/[-_]/g, " ")
-      .toLowerCase()
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  };
-
-  const generateUniqueName = (name: string, existingNames: string[]) => {
-    let count = 1;
-    let newName = name;
-    while (existingNames.includes(newName)) {
-      newName = `${name} ${count}`;
-      count++;
-    }
-    return newName;
-  };
-
-  const generateDescription = (name: string) => {
-    return `✨ Matriz de bordado "${name}" perfeita para criar peças incríveis e encantar suas clientes!
-
-🧵 Ideal para bordadeiras que querem se destacar e vender mais
-💎 Design exclusivo e de alta qualidade
-🚀 Pronta para uso imediato
-
-👉 Garanta agora e transforme seus bordados em verdadeiras obras de arte!
-
-🔥 Baixe agora e aumente suas vendas com bordados profissionais!`;
-  };
 
   useEffect(() => {
-    setCurrentPageId('home');
-    return () => setCurrentPageId(null);
-  }, [setCurrentPageId]);
-
-  const fetchFiles = async () => {
-    setLoading(true);
-    try {
-      const url = API_BASE_URL + "/api/list-embroidery";
-      console.log(`🔄 Sincronizando vitrine com a API... URL: ${url}`);
-      const res = await fetchWithTimeout(url, {
-        cache: "no-store"
-      });
-      
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
-      
-      const data = await res.json();
-      console.log("📂 FILES:", data.files);
-
-      // 🔥 Remove duplicados usando o campo file ou gcsPath como chave
-      const uniqueFiles = Array.from(
-        new Map((data.files || []).map((f: any) => {
-          const key = typeof f === 'string' ? f : (f.gcsPath || f.file || JSON.stringify(f));
-          return [key, f];
-        })).values()
-      );
-
-      const filesList = uniqueFiles.map((f: any) => typeof f === 'string' ? f : (f.gcsPath || f.file)) as string[];
-
-      // 1. Busca produtos no Firebase Realtime Database (Fonte de Verdade)
-      const rtdbProducts = await storage.getProductsFromRTDB();
-      
-      // 2. Filtra produtos: Remove duplicados e órfãos (que não estão no GCS)
-      const uniqueProductsMap = new Map();
-      rtdbProducts.forEach(p => {
-        if (p.gcsPath && filesList.includes(p.gcsPath)) {
-          uniqueProductsMap.set(p.gcsPath, p);
-        } else if (!p.gcsPath) {
-          uniqueProductsMap.set(p.id, p);
-        }
-      });
-
-      const finalProducts = Array.from(uniqueProductsMap.values());
-
-      storage.saveProducts(finalProducts);
-      setProducts(finalProducts);
-      
-      // Sincroniza de volta se houver mudanças (limpeza de órfãos)
-      if (finalProducts.length !== rtdbProducts.length) {
-        try {
-          await storage.syncProductsToRTDB(finalProducts);
-        } catch (e) {
-          console.warn("Could not sync cleaned list to RTDB (might be unauthorized):", e);
-        }
-      }
-    } catch (err) {
-      console.error("Erro ao buscar arquivos:", err);
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
+    // Load config and favorites locally
     setConfig(storage.getConfig());
     setFavorites(storage.getFavorites());
     
-    // Initial fetch from API
-    fetchFiles();
-
     // Subscribe to real-time products from RTDB
     const unsubscribe = storage.subscribeToProducts((rtdbProducts) => {
       console.log("MATRIZES DO BACKEND (RTDB):", rtdbProducts);
@@ -345,10 +251,29 @@ export default function Catalog({ user }: CatalogProps) {
         setProducts(rtdbProducts);
         storage.saveProducts(rtdbProducts);
       } else {
-        // If RTDB is empty, we don't clear immediately, we trust the fetchFiles sync
+        setProducts([]);
       }
+      setLoading(false);
     });
 
+    // 🔥 Garantir que a vitrine use SOMENTE dados da API (Verificação de arquivos)
+    const fetchFiles = async () => {
+      try {
+        const res = await fetch(API_BASE_URL + "/api/list-embroidery");
+        const data = await res.json();
+        console.log("MATRIZES DA API (GCS):", data.files);
+        
+        if (!data.files) {
+          // Se a API falhar ou não houver arquivos, não fazemos nada drástico aqui 
+          // pois os produtos vêm do RTDB, mas registramos o log.
+        }
+      } catch (err) {
+        console.error("Erro ao verificar arquivos da API:", err);
+      }
+    };
+    fetchFiles();
+
+    // Poll for config and favorites (still local for now)
     const interval = setInterval(() => {
       setConfig(storage.getConfig());
       setFavorites(storage.getFavorites());

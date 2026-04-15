@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { storage, Product, fileToBase64, compressImage, Review } from '../services/storage';
 import { analyzeEmbroideryImage, analyzeEmbroideryFilename, generateEmbroideryPreview } from '../services/gemini';
 import { cn } from '../lib/utils';
-import { API_BASE_URL, fetchWithTimeout } from '../config';
+import { API_BASE_URL } from '../config';
 
 export default function ManagerDashboard() {
   const generateId = () => {
@@ -71,9 +71,8 @@ export default function ManagerDashboard() {
       setLoading(false);
     });
 
-    // 🔥 Carregar clientes e arquivos apenas via API
+    // 🔥 Carregar clientes apenas via API
     fetchUsers();
-    fetchFiles();
 
     return () => {
       unsubscribeProducts();
@@ -248,109 +247,103 @@ export default function ManagerDashboard() {
   const [isTransforming, setIsTransforming] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const generateName = (fileName: string) => {
-    return fileName
-      .replace(/\.[^/.]+$/, "")
-      .replace(/[-_]/g, " ")
-      .toLowerCase()
-      .split(' ')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
-  };
-
-  const generateUniqueName = (name: string, existingNames: string[]) => {
-    let count = 1;
-    let newName = name;
-    while (existingNames.includes(newName)) {
-      newName = `${name} ${count}`;
-      count++;
-    }
-    return newName;
-  };
-
-  const generateDescription = (name: string) => {
-    return `✨ Matriz de bordado "${name}" perfeita para criar peças incríveis e encantar suas clientes!
-
-🧵 Ideal para bordadeiras que querem se destacar e vender mais
-💎 Design exclusivo e de alta qualidade
-🚀 Pronta para uso imediato
-
-👉 Garanta agora e transforme seus bordados em verdadeiras obras de arte!
-
-🔥 Baixe agora e aumente suas vendas com bordados profissionais!`;
-  };
-
   const fetchFiles = async () => {
     setIsSyncing(true);
     try {
-      const url = API_BASE_URL + '/api/list-embroidery';
-      console.log(`🔄 Sincronizando arquivos... URL: ${url}`);
-      
-      const res = await fetchWithTimeout(url, {
-        cache: "no-store"
-      });
-      
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
-      
+      console.log("🔄 Iniciando sincronização automática...");
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const res = await fetch(API_BASE_URL + '/api/list-embroidery');
       const data = await res.json();
-      console.log("📂 FILES:", data.files);
+      const filesList = data.files || [];
       
-      // 🔥 Remove duplicados usando o campo file ou gcsPath como chave
-      const uniqueFiles = Array.from(
-        new Map((data.files || []).map((f: any) => {
-          const key = typeof f === 'string' ? f : (f.gcsPath || f.file || JSON.stringify(f));
-          return [key, f];
-        })).values()
-      );
-      
-      const filesList = uniqueFiles.map((f: any) => typeof f === 'string' ? f : (f.gcsPath || f.file)) as string[];
+      // 🔥 ATUALIZA LISTA DE ARQUIVOS RAW
       setFiles(filesList);
       
-      // 1. Busca produtos no Firebase Realtime Database (Fonte de Verdade)
-      const rtdbProducts = await storage.getProductsFromRTDB();
-      
-      // 2. Filtra produtos: Remove duplicados e órfãos (que não estão no GCS)
-      const uniqueProductsMap = new Map();
-      rtdbProducts.forEach(p => {
-        if (p.gcsPath && filesList.includes(p.gcsPath)) {
-          uniqueProductsMap.set(p.gcsPath, p);
-        } else if (!p.gcsPath) {
-          uniqueProductsMap.set(p.id, p);
-        }
+      if (!filesList) return;
+
+      const allProducts = storage.getProducts();
+      console.log("🌐 Chamando API:", API_BASE_URL);
+      const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
+      const gcsStatusData = await gcsStatusRes.json();
+      const bucket = gcsStatusData.bucket || 'appbordados';
+
+      // 1. Filter out products that have a gcsPath but the file is no longer in GCS
+      let updatedProducts = allProducts.filter(p => {
+        if (!p.gcsPath) return true;
+        return filesList.includes(p.gcsPath);
       });
 
-      const finalProducts = Array.from(uniqueProductsMap.values());
-      
-      storage.saveProducts(finalProducts);
-      setProducts(finalProducts);
-      
-      // Sincroniza de volta se houver mudanças (limpeza de órfãos)
-      if (finalProducts.length !== rtdbProducts.length) {
-        await storage.syncProductsToRTDB(finalProducts);
+      // 2. Add products that are in GCS but not in the database
+      const existingGcsPaths = new Set(updatedProducts.map(p => p.gcsPath).filter(Boolean));
+      const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
+
+      if (missingFiles.length > 0) {
+        console.log(`Sync: Found ${missingFiles.length} new files in GCS. Adding to catalog...`);
+        
+        for (const file of missingFiles) {
+          const fileName = file.split('/').pop() || file;
+          const baseName = fileName.split('.').shift() || fileName;
+          
+          // AI Analysis of filename for better metadata
+          let analysis = null;
+          try {
+            analysis = await analyzeEmbroideryFilename(fileName) as any;
+          } catch (e) {
+            console.warn("AI analysis failed for synced file:", fileName);
+          }
+
+          const newProduct: Product = {
+            id: generateId(),
+            name: analysis?.name || baseName,
+            description: analysis?.description || `Matriz de bordado sincronizada: ${fileName}`,
+            price: 19.90,
+            imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${baseName}.png`,
+            fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
+            fileName: fileName,
+            gcsPath: file,
+            category: analysis?.category || 'Sincronizado',
+            createdAt: new Date().toISOString(),
+            soldCount: 0,
+            reviews: []
+          };
+          updatedProducts.push(newProduct);
+        }
+      }
+
+      if (updatedProducts.length !== allProducts.length || missingFiles.length > 0) {
+        console.log(`Sync complete: ${updatedProducts.length} products total.`);
+        storage.saveProducts(updatedProducts);
+        setProducts(updatedProducts);
+        
+        // Sync to RTDB if possible
+        try {
+          await storage.syncProductsToRTDB(updatedProducts);
+        } catch (e) {
+          console.warn("Could not sync updated list to RTDB during auto-sync:", e);
+        }
       }
     } catch (error) {
-      console.error("Erro ao buscar arquivos:", error);
+      console.error("Sync Error:", error);
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const uploadToGCS = async (file: File, imageFile?: File) => {
-    console.log("📁 FILE:", file);
+  const uploadToGCS = async (file: File) => {
+    console.log("📁 FILE REAL:", file);
     
+    // 🔥 FORÇA criação correta do blob (Studio bug fix)
+    const fixedFile = new File([file], file.name, {
+      type: file.type,
+    });
+
+    console.log("🌐 URL:", API_BASE_URL + "/api/upload-embroidery");
+
     const formData = new FormData();
-    formData.append('file', file);
-    if (imageFile) {
-      formData.append('image', imageFile);
-    }
+    formData.append('file', fixedFile);
 
     try {
-      const url = API_BASE_URL + '/api/upload-embroidery';
-      console.log("🌐 URL:", url);
-
-      const response = await fetchWithTimeout(url, {
+      const response = await fetch(API_BASE_URL + '/api/upload-embroidery', {
         method: 'POST',
         body: formData,
       });
@@ -451,13 +444,49 @@ export default function ManagerDashboard() {
         ));
 
         try {
-          if (group.embroidery) {
-            // 1. Upload to GCS with Image for AI analysis
-            await uploadToGCS(group.embroidery, group.image);
+          let imageUrl = '';
+          let fileUrl = '';
+          let fileName = '';
+          let gcsPath = '';
+          let analysis = null;
 
-            // 2. Wait a bit for processing
-            await new Promise(resolve => setTimeout(resolve, 2000));
+          if (group.embroidery) {
+            // 1. Upload to GCS
+            const uploadResult = await uploadToGCS(group.embroidery);
+            fileUrl = uploadResult.publicUrl;
+            fileName = group.embroidery.name;
+            gcsPath = uploadResult.gcsPath;
+
+            // 2. Wait for Cloud Function processing (3-5 seconds as requested)
+            await new Promise(resolve => setTimeout(resolve, 4000));
+
+            // 3. Set the preview URL
+            imageUrl = uploadResult.previewUrl;
+            
+            // AI Analysis of filename
+            analysis = await analyzeEmbroideryFilename(group.embroidery.name) as any;
+          } else if (group.image) {
+            const base64 = await fileToBase64(group.image);
+            imageUrl = await compressImage(base64);
+            analysis = await analyzeEmbroideryImage(imageUrl.split(',')[1], group.image.type) as any;
           }
+
+          const newProduct: Product = {
+            id: generateId(),
+            name: analysis?.name || baseName,
+            description: analysis?.description || `Matriz de bordado ${fileName || baseName}.`,
+            price: 19.90,
+            imageUrl: imageUrl || 'https://picsum.photos/seed/embroidery/800/600',
+            fileUrl: fileUrl,
+            fileName: fileName,
+            gcsPath: gcsPath, // Store the GCS path for sync/delete
+            category: analysis?.category || 'Geral',
+            createdAt: new Date().toISOString(),
+            soldCount: 0,
+            reviews: []
+          };
+
+          newProducts.push(newProduct);
           
           setProcessingFiles(prev => prev.map(p => 
             (p.name === group.image?.name || p.name === group.embroidery?.name) 
@@ -474,8 +503,24 @@ export default function ManagerDashboard() {
         }
       }
 
-      // 🔥 SINCRONIZAÇÃO TOTAL APÓS UPLOAD
-      await fetchFiles();
+      if (newProducts.length > 0) {
+        // Fetch FRESH products from storage to avoid overwriting background updates
+        const currentAllProducts = storage.getProducts();
+        const updatedProducts = [...currentAllProducts, ...newProducts];
+        
+        storage.saveProducts(updatedProducts);
+        try {
+          await storage.syncProductsToRTDB(updatedProducts);
+        } catch (syncErr: any) {
+          console.error('Erro ao sincronizar com RTDB:', syncErr);
+          if (syncErr.message?.includes('Tentativa de sincronização sem usuário autenticado')) {
+            alert('Aviso: Os produtos foram salvos localmente, mas não puderam ser sincronizados com o banco de dados (Sem Usuário Firebase).');
+          } else if (syncErr.message?.includes('PERMISSION_DENIED')) {
+            alert('Aviso: Os produtos foram salvos localmente, mas não puderam ser sincronizados com o banco de dados (Erro de Permissão). Verifique as Regras do Realtime Database.');
+          }
+        }
+        setProducts(storage.getProducts());
+      }
     } finally {
       setIsBulkAdding(false);
     }
@@ -702,21 +747,66 @@ export default function ManagerDashboard() {
       if (matrixFile) {
         setIsTransforming(true);
         try {
-          // 1. Upload to GCS with Image for AI analysis
-          await uploadToGCS(matrixFile, imageFile);
+          // 1. Upload to GCS
+          const uploadResult = await uploadToGCS(matrixFile);
+          updates.fileUrl = uploadResult.publicUrl;
+          updates.fileName = matrixFile.name;
+          
+          if (!formData.name) {
+            updates.name = matrixFile.name.split('.')[0];
+          }
 
-          // 2. Wait a bit for processing
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          setIsAdding(false);
-          setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' });
-          
-          // 🔥 SINCRONIZAÇÃO TOTAL APÓS UPLOAD
-          await fetchFiles();
-          
-          alert(`Matriz processada e cadastrada com sucesso!`);
+          // 2. Wait for Cloud Function processing
+          // The user requested 3-5 seconds
+          await new Promise(resolve => setTimeout(resolve, 4000));
+
+          // 3. Set the preview URL
+          updates.imageUrl = uploadResult.previewUrl;
+
+          // AI Analysis
+          const analysis = await analyzeEmbroideryFilename(matrixFile.name) as any;
+          if (analysis) {
+            updates.name = updates.name || analysis.name;
+            updates.category = analysis.category;
+            updates.description = analysis.description;
+          }
+
+          // If it's a new product, auto-save it as requested
+          if (!editingId) {
+            // Fetch FRESH products to avoid overwriting background updates
+            const currentAllProducts = storage.getProducts();
+            const newProduct: Product = {
+              id: generateId(),
+              name: updates.name || matrixFile.name.split('.')[0],
+              description: updates.description || 'Nova matriz adicionada via arquivo',
+              price: 19.90,
+              imageUrl: updates.imageUrl || 'https://picsum.photos/seed/embroidery/800/600',
+              fileUrl: updates.fileUrl || '',
+              fileName: updates.fileName || '',
+              gcsPath: uploadResult.gcsPath, // Store the GCS path for sync/delete
+              category: updates.category || 'Outros',
+              createdAt: new Date().toISOString(),
+              soldCount: 0,
+              reviews: []
+            };
+            
+            const updatedProducts = [...currentAllProducts, newProduct];
+            storage.saveProducts(updatedProducts);
+            storage.syncProductsToRTDB(updatedProducts); // Sync to RTDB
+            setProducts(storage.getProducts());
+            setIsAdding(false);
+            setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' });
+            
+            // 🔥 ATUALIZA LISTA DEPOIS DE UPLOAD
+            await fetchFiles();
+            
+            alert(`Matriz "${matrixFile.name}" processada e cadastrada automaticamente!`);
+          }
         } catch (err) {
           console.error("Erro ao processar arquivo manual com GCS:", err);
+          const base64 = await fileToBase64(matrixFile);
+          updates.fileUrl = base64;
+          updates.fileName = matrixFile.name;
         } finally {
           setIsTransforming(false);
         }
