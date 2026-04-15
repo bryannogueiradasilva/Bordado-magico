@@ -254,7 +254,7 @@ export const storage = {
       }
     }, (error) => {
       console.error('Error subscribing to products:', error);
-      callback([]);
+      callback(storage.getProducts());
     });
   }
 };

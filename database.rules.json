@@ -2,28 +2,22 @@
   "rules": {
     "products": {
       ".read": true,
-      ".write": "true"
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'manager' || auth.token.email == 'bryannogueira07@gmail.com')"
     },
     "users": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'manager' || auth.token.email == 'bryannogueira07@gmail.com')",
       "$uid": {
-        ".read": "auth != null && (auth.uid === $uid || auth.token.email === 'bryannogueira07@gmail.com' || root.child('users').child(auth.uid).child('role').val() === 'manager')",
-        ".write": "auth != null && (auth.uid === $uid || auth.token.email === 'bryannogueira07@gmail.com' || auth.token.email === 'bryannogueira07@gmail.com')"
+        ".read": "auth != null && (auth.uid == $uid || root.child('users').child(auth.uid).child('role').val() == 'manager' || auth.token.email == 'bryannogueira07@gmail.com')",
+        ".write": "auth != null && (auth.uid == $uid || root.child('users').child(auth.uid).child('role').val() == 'manager' || auth.token.email == 'bryannogueira07@gmail.com')"
       }
     },
-    "online": {
-      ".read": "auth != null",
-      "global": {
-        "$uid": {
-          ".write": "auth != null && auth.uid == $uid"
-        }
-      },
-      "paginas": {
-        "$paginaId": {
-          "$uid": {
-            ".write": "auth != null && auth.uid == $uid"
-          }
-        }
-      }
+    "orders": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'manager' || auth.token.email == 'bryannogueira07@gmail.com')",
+      ".write": "auth != null"
+    },
+    "config": {
+      ".read": true,
+      ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'manager' || auth.token.email == 'bryannogueira07@gmail.com')"
     }
   }
 }

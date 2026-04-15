@@ -210,7 +210,7 @@ import { API_BASE_URL } from '../config';
 export default function Catalog({ user }: CatalogProps) {
   const { setCurrentPageId } = usePresence();
   const navigate = useNavigate();
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>(storage.getProducts());
   
   useEffect(() => {
     setCurrentPageId('home');
@@ -220,7 +220,7 @@ export default function Catalog({ user }: CatalogProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [category, setCategory] = useState('Todas');
   const [currentTab, setCurrentTab] = useState<'catalog' | 'my-matrices'>('catalog');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(storage.getProducts().length === 0);
   const [showSuccess, setShowSuccess] = useState(false);
   const [lastPurchased, setLastPurchased] = useState<Product | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
