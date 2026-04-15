@@ -395,13 +395,13 @@ export default function ProductDetail({ user }: ProductDetailProps) {
                     size={16} 
                     className={cn(
                       "fill-current md:w-5 md:h-5",
-                      star <= ((product.reviews || []).reduce((acc, r) => acc + r.rating, 0) / (product.reviews?.length || 1))
+                      star <= ((product.reviews || []).reduce((acc, r: any) => acc + r.rating, 0) / ((product.reviews || []).length || 1))
                         ? "text-yellow-400" 
                         : "text-gray-200"
                     )} 
                   />
                 ))}
-                <span className="ml-2 text-gray-500 font-bold text-sm md:text-base">({product.reviews?.length || 0})</span>
+                <span className="ml-2 text-gray-500 font-bold text-sm md:text-base">({(product.reviews || []).length})</span>
               </div>
             </div>
 
@@ -481,35 +481,48 @@ export default function ProductDetail({ user }: ProductDetailProps) {
               )}
 
               {user && (
-                <button
-                  onClick={handleConvertAndDownload}
-                  disabled={isConverting}
-                  className={cn(
-                    "w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-black text-xl md:text-2xl shadow-xl transition-all flex items-center justify-center gap-3 md:gap-4 relative overflow-hidden active:scale-[0.98] cursor-pointer",
-                    isConverting 
-                      ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
-                      : isPurchased 
-                        ? "bg-green-500 text-white hover:bg-green-600 cursor-pointer"
-                        : "bg-pink-500 text-white hover:bg-pink-600 cursor-pointer"
-                  )}
-                >
-                  {isConverting ? (
-                    <>
-                      <RefreshCw className="animate-spin" size={24} />
-                      <span>Convertendo... {conversionProgress}%</span>
-                    </>
-                  ) : isPurchased ? (
-                    <>
-                      <Download size={24} className="md:w-7 md:h-7" />
-                      <span>Baixar em {displayFormat}</span>
-                    </>
-                  ) : (
-                    <>
-                      <ShoppingCart size={24} className="md:w-7 md:h-7" />
-                      <span>Comprar em {displayFormat}</span>
-                    </>
-                  )}
-                </button>
+                <div className="space-y-4">
+                  <button
+                    onClick={handleConvertAndDownload}
+                    disabled={isConverting}
+                    className={cn(
+                      "w-full py-4 md:py-6 rounded-2xl md:rounded-3xl font-black text-xl md:text-2xl shadow-xl transition-all flex items-center justify-center gap-3 md:gap-4 relative overflow-hidden active:scale-[0.98] cursor-pointer",
+                      isConverting 
+                        ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                        : isPurchased 
+                          ? "bg-green-500 text-white hover:bg-green-600 cursor-pointer"
+                          : "bg-pink-500 text-white hover:bg-pink-600 cursor-pointer"
+                    )}
+                  >
+                    {isConverting ? (
+                      <>
+                        <RefreshCw className="animate-spin" size={24} />
+                        <span>Convertendo... {conversionProgress}%</span>
+                      </>
+                    ) : isPurchased ? (
+                      <>
+                        <Download size={24} className="md:w-7 md:h-7" />
+                        <span>Baixar em {displayFormat}</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShoppingCart size={24} className="md:w-7 md:h-7" />
+                        <span>Comprar em {displayFormat}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                      <Shield size={14} className="text-green-500" />
+                      Compra 100% Segura
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                      <CheckCircle2 size={14} className="text-blue-500" />
+                      Download Imediato
+                    </div>
+                  </div>
+                </div>
               )}
 
               {showSuccess && (
@@ -525,16 +538,34 @@ export default function ProductDetail({ user }: ProductDetailProps) {
             </div>
           </div>
 
-          <div className="mt-auto pt-8 border-t border-gray-100 flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm uppercase tracking-widest font-bold mb-1">Valor</p>
-              <p className="text-4xl font-black text-pink-600">R$ {product.price.toFixed(2)}</p>
+          <div className="mt-auto pt-8 border-t border-gray-100">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+              <div className="bg-green-50 p-6 rounded-3xl border border-green-100 flex flex-col items-center text-center gap-3 shadow-sm">
+                <Shield className="text-green-600" size={32} />
+                <span className="text-xs font-black text-green-800 uppercase tracking-widest leading-tight">Compra 100%<br/>Segura</span>
+              </div>
+              <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 flex flex-col items-center text-center gap-3 shadow-sm">
+                <CheckCircle2 className="text-blue-600" size={32} />
+                <span className="text-xs font-black text-blue-800 uppercase tracking-widest leading-tight">Download<br/>Imediato</span>
+              </div>
+              <div className="bg-purple-50 p-6 rounded-3xl border border-purple-100 flex flex-col items-center text-center gap-3 shadow-sm hidden md:flex">
+                <Settings className="text-purple-600" size={32} />
+                <span className="text-xs font-black text-purple-800 uppercase tracking-widest leading-tight">Suporte<br/>Técnico</span>
+              </div>
             </div>
-            <div className="text-right">
-              <p className="text-gray-400 text-sm uppercase tracking-widest font-bold mb-1">Garantia</p>
-              <p className="text-lg font-bold text-green-600 flex items-center gap-1">
-                <Shield size={18} /> 100% Seguro
-              </p>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-400 text-sm uppercase tracking-widest font-bold mb-1">Valor</p>
+                <p className="text-4xl font-black text-pink-600">R$ {product.price.toFixed(2)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-gray-400 text-sm uppercase tracking-widest font-bold mb-1">Qualidade</p>
+                <div className="flex items-center gap-2 bg-pink-50 px-4 py-2 rounded-full border border-pink-100">
+                  <Star className="text-pink-500 fill-current" size={16} />
+                  <span className="text-sm font-black text-pink-600 uppercase tracking-widest">Premium</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -633,9 +664,9 @@ export default function ProductDetail({ user }: ProductDetailProps) {
           </div>
         )}
 
-        {product.reviews.length > 0 ? (
+        {(product.reviews || []).length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {product.reviews.map((review) => (
+            {(product.reviews || []).map((review) => (
               <div key={review.id} className="bg-gray-50 p-6 rounded-3xl border border-gray-100 flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">

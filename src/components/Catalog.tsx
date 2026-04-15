@@ -271,9 +271,9 @@ export default function Catalog({ user }: CatalogProps) {
   const orders = storage.getOrders();
   const userPurchasedIds = user ? orders.filter(o => o.userId === user.id).map(o => o.productId) : [];
 
-  const categories = ['Todas', ...Array.from(new Set(products.map(p => p.category)))];
+  const categories = ['Todas', ...Array.from(new Set((products || []).map(p => p.category)))];
 
-  const filteredProducts = products.filter(product => {
+  const filteredProducts = (products || []).filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          product.description.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -540,14 +540,14 @@ export default function Catalog({ user }: CatalogProps) {
               >
                 <Link 
                   to={`/product/${product.id}`} 
-                  className="relative h-64 bg-gray-50 flex items-center justify-center overflow-hidden cursor-pointer block group"
+                  className="relative h-72 bg-gray-50 flex items-center justify-center overflow-hidden cursor-pointer block group"
                 >
-                  <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
+                  <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#94a3b8 1px, transparent 1px)', backgroundSize: '16px 16px' }}></div>
                   {product.imageUrl ? (
                     <img 
                       src={product.imageUrl} 
                       alt={product.name}
-                      className="w-full h-full object-contain p-4 group-hover:scale-110 transition-transform duration-500 relative z-10"
+                      className="w-full h-full object-contain p-6 group-hover:scale-110 transition-transform duration-500 relative z-10"
                       referrerPolicy="no-referrer"
                     />
                   ) : (
@@ -564,11 +564,11 @@ export default function Catalog({ user }: CatalogProps) {
                         e.stopPropagation(); 
                         setZoomProduct(product);
                       }}
-                      className="p-3 bg-white/90 text-gray-700 rounded-full shadow-md hover:bg-white transition-all cursor-pointer flex items-center gap-2"
+                      className="p-2.5 bg-white text-gray-700 rounded-full shadow-lg hover:bg-gray-50 transition-all cursor-pointer flex items-center gap-2 border border-gray-100"
                       title="Zoom nos pontos"
                     >
-                      <Search size={20} />
-                      <span className="text-sm font-bold">Zoom</span>
+                      <Search size={18} />
+                      <span className="text-xs font-black uppercase tracking-tight">Zoom</span>
                     </button>
                   </div>
                   <div className="absolute top-4 right-4 z-20">
@@ -579,30 +579,30 @@ export default function Catalog({ user }: CatalogProps) {
                         handleToggleFavorite(product.id);
                       }}
                       className={cn(
-                        "p-3 rounded-full shadow-md transition-all cursor-pointer",
+                        "p-3 rounded-full shadow-lg transition-all cursor-pointer border border-white",
                         favorites.includes(product.id)
-                          ? "bg-pink-500 text-white"
-                          : "bg-white/90 text-pink-500 hover:bg-pink-500 hover:text-white"
+                          ? "bg-white text-pink-500"
+                          : "bg-white text-gray-300 hover:text-pink-500"
                       )}
                     >
-                      <Heart size={24} fill={favorites.includes(product.id) ? "currentColor" : "none"} />
+                      <Heart size={22} fill={favorites.includes(product.id) ? "currentColor" : "none"} />
                     </button>
                   </div>
-                  <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-2">
-                    <span className="bg-pink-500 text-white px-4 py-1 rounded-full font-bold text-sm">
+                  <div className="absolute bottom-4 left-4 z-20 flex flex-col gap-1.5">
+                    <span className="bg-[#f43f5e] text-white px-5 py-1.5 rounded-full font-black text-xs uppercase tracking-widest shadow-md w-fit">
                       {product.category}
                     </span>
-                    <span className="bg-white/90 text-pink-600 px-3 py-1 rounded-full font-black text-[10px] uppercase tracking-tighter shadow-sm flex items-center gap-1">
+                    <span className="bg-white text-[#f43f5e] px-3 py-1 rounded-full font-black text-[9px] uppercase tracking-tighter shadow-sm flex items-center gap-1 border border-pink-100">
                       <CheckCircle2 size={10} />
-                      Fidelidade Técnica
+                      FIDELIDADE TÉCNICA
                     </span>
                   </div>
                 </Link>
-                <div className="p-6 md:p-8">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-xl md:text-2xl font-bold text-gray-800 truncate">{product.name}</h3>
-                    <div className="flex items-center gap-1 bg-green-50 text-green-700 px-2 md:px-3 py-1 rounded-full text-[10px] md:text-xs font-black border border-green-100 shrink-0">
-                      <TrendingUp size={10} className="md:w-3 md:h-3" />
+                <div className="p-8">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-2xl font-black text-[#1e293b] truncate uppercase tracking-tight">{product.name}</h3>
+                    <div className="flex items-center gap-1 bg-[#f0fdf4] text-[#166534] px-3 py-1 rounded-full text-xs font-black border border-[#dcfce7] shrink-0">
+                      <TrendingUp size={12} />
                       {product.soldCount || 0}
                     </div>
                   </div>
@@ -611,49 +611,34 @@ export default function Catalog({ user }: CatalogProps) {
                     {[1, 2, 3, 4, 5].map((s) => (
                       <Star 
                         key={s} 
-                        size={12} 
+                        size={14} 
                         className={cn(
                           "fill-current",
-                          s <= ((product.reviews || []).reduce((acc, r) => acc + r.rating, 0) / (product.reviews?.length || 1))
+                          s <= ((product.reviews || []).reduce((acc, r: any) => acc + r.rating, 0) / ((product.reviews || []).length || 1))
                             ? "text-yellow-400" 
                             : "text-gray-200"
                         )} 
                       />
                     ))}
-                    <span className="text-[10px] text-gray-400 font-bold ml-1">({product.reviews?.length || 0})</span>
+                    <span className="text-xs text-gray-400 font-bold ml-1">({(product.reviews || []).length})</span>
                   </div>
 
-                  <p className="text-gray-500 text-sm md:text-lg mb-6 line-clamp-2 h-10 md:h-14">{product.description}</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-2xl md:text-3xl font-black text-pink-600 whitespace-nowrap">
+                  <p className="text-gray-500 text-sm mb-8 line-clamp-2 h-10 leading-relaxed font-medium">
+                    {product.description}
+                  </p>
+                  
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-3xl font-black text-[#f43f5e] whitespace-nowrap">
                       R$ {product.price.toFixed(2)}
                     </span>
-                    {userPurchasedIds.includes(product.id) ? (
-                      <button 
-                        onClick={() => handleDownload(product)}
-                        disabled={isDownloading}
-                        className="px-4 md:px-8 py-3 md:py-4 bg-green-500 text-white rounded-xl md:rounded-2xl text-base md:text-xl font-bold shadow-lg hover:bg-green-600 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                      >
-                        <Download size={20} className="md:w-6 md:h-6" />
-                        <span className="hidden sm:inline">{isDownloading ? `Baixando... ${downloadProgress}%` : 'Baixar'}</span>
-                        <span className="sm:hidden">{isDownloading ? `${downloadProgress}%` : 'Baixar'}</span>
-                      </button>
-                    ) : (
-                      <button 
-                        onClick={() => handleBuy(product)}
-                        disabled={!config.buttonsEnabled}
-                        className={cn(
-                          "px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl text-base md:text-xl font-bold shadow-lg active:scale-95 transition-all flex items-center gap-2",
-                          config.buttonsEnabled 
-                            ? 'bg-pink-500 text-white hover:bg-pink-600 cursor-pointer' 
-                            : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                        )}
-                      >
-                        {config.buttonsEnabled ? <ShoppingCart size={20} className="md:w-6 md:h-6" /> : <AlertTriangle size={20} className="md:w-6 md:h-6" />}
-                        <span className="hidden sm:inline">{config.buttonsEnabled ? 'Comprar' : 'Indisponível'}</span>
-                        <span className="sm:hidden">{config.buttonsEnabled ? 'Comprar' : 'Off'}</span>
-                      </button>
-                    )}
+                    
+                    <Link
+                      to={`/product/${product.id}`}
+                      className="flex-1 bg-[#f43f5e] text-white px-6 py-4 rounded-2xl font-black text-lg hover:bg-[#e11d48] active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-rose-100"
+                    >
+                      <ShoppingCart size={22} />
+                      Comprar
+                    </Link>
                   </div>
                 </div>
               </motion.div>

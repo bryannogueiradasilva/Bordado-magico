@@ -260,23 +260,6 @@ export default function ManagerDashboard() {
     }
   };
 
-  const handleFullSync = async () => {
-    try {
-      const localProducts = storage.getProducts();
-      await storage.syncProductsToRTDB(localProducts);
-      alert('Sincronização completa! Todos os dados do Studio foram enviados para a produção.');
-    } catch (err: any) {
-      console.error('Erro na sincronização total:', err);
-      if (err.message?.includes('Tentativa de sincronização sem usuário autenticado')) {
-        alert('Erro: Tentativa de sincronização sem usuário autenticado pelo Firebase. Por favor, faça login com sua conta oficial ou registre-se para habilitar a sincronização.');
-      } else if (err.message?.includes('PERMISSION_DENIED') || err.code === 'PERMISSION_DENIED') {
-        alert('Erro de Permissão: O banco de dados recusou a sincronização. Verifique se você está logado com a conta correta e se o e-mail está verificado (E-mail verificado é obrigatório para sincronizar).');
-      } else {
-        alert('Erro ao sincronizar. Verifique sua conexão e permissões (E-mail verificado e login oficial são necessários).');
-      }
-    }
-  };
-
   const handleAIUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -451,13 +434,13 @@ export default function ManagerDashboard() {
     setProducts(updatedProducts);
   };
 
-  const filteredProducts = products.filter(p => 
+  const filteredProducts = (products || []).filter(p => 
     p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.fileName?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const filteredUsers = users
+  const filteredUsers = (users || [])
     .filter(u => u.uid) // 🔥 Filtrar clientes inválidos antes de renderizar
     .filter(u => 
       (u.displayName || u.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -686,6 +669,7 @@ export default function ManagerDashboard() {
             setFormData({ name: '', description: '', price: '', soldCount: '0', imageUrl: '', fileUrl: '', fileName: '', category: '' });
             
             alert(`Matriz "${matrixFile.name}" processada e cadastrada automaticamente!`);
+            return; // 🔥 IMPORTANTE: Retornar aqui para evitar o setFormData no final que causava duplicidade
           }
         } catch (err) {
           console.error("Erro ao processar arquivo manual com GCS:", err);
@@ -714,7 +698,7 @@ export default function ManagerDashboard() {
     }
   };
 
-  if (loading && products.length === 0) return null;
+  if (loading && (products || []).length === 0) return null;
 
   return (
     <div className="max-w-6xl mx-auto px-4 space-y-8 pb-20">
@@ -854,7 +838,7 @@ export default function ManagerDashboard() {
           {/* Stats Grid */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
-              <span className="text-2xl font-black text-gray-800">{products.length}</span>
+              <span className="text-2xl font-black text-gray-800">{(products || []).length}</span>
               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Matrizes</span>
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
@@ -871,7 +855,7 @@ export default function ManagerDashboard() {
             </div>
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center">
               <span className="text-2xl font-black text-gray-800">
-                {new Set(products.map(p => p.category)).size}
+                {new Set((products || []).map(p => p.category)).size}
               </span>
               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Categorias</span>
             </div>
@@ -882,7 +866,7 @@ export default function ManagerDashboard() {
             <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Suas Matrizes</h2>
             <div className="flex items-center gap-2 text-sm font-bold text-gray-400">
               <Filter size={16} />
-              <span>{filteredProducts.length} itens encontrados</span>
+              <span>{(filteredProducts || []).length} itens encontrados</span>
             </div>
           </div>
         </>
@@ -894,7 +878,7 @@ export default function ManagerDashboard() {
               <h2 className="text-2xl font-black text-gray-800 uppercase tracking-tight">Seus Clientes</h2>
               <div className="flex items-center gap-2 text-sm font-bold text-gray-400">
                 <Users size={16} />
-                <span>{filteredUsers.length} clientes encontrados</span>
+                <span>{(filteredUsers || []).length} clientes encontrados</span>
               </div>
             </div>
             
@@ -1339,9 +1323,9 @@ export default function ManagerDashboard() {
 
                 {/* Reviews List */}
                 <div className="lg:col-span-3 space-y-6">
-                  <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight">Avaliações ({products.find(p => p.id === managingReviewsId)?.reviews.length})</h3>
+                  <h3 className="text-lg font-black text-gray-800 uppercase tracking-tight">Avaliações ({(products.find(p => p.id === managingReviewsId)?.reviews || []).length})</h3>
                   <div className="space-y-4">
-                    {products.find(p => p.id === managingReviewsId)?.reviews.map(review => (
+                    {(products.find(p => p.id === managingReviewsId)?.reviews || []).map(review => (
                       <div key={review.id} className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex justify-between items-start group hover:shadow-md transition-shadow">
                         <div className="flex gap-4">
                           <div className="w-12 h-12 bg-pink-50 rounded-2xl flex items-center justify-center text-pink-500 shrink-0 shadow-inner">
@@ -1371,7 +1355,7 @@ export default function ManagerDashboard() {
                         </button>
                       </div>
                     ))}
-                    {products.find(p => p.id === managingReviewsId)?.reviews.length === 0 && (
+                    {(products.find(p => p.id === managingReviewsId)?.reviews || []).length === 0 && (
                       <div className="text-center py-20 bg-gray-50/50 rounded-[40px] border-2 border-dashed border-gray-100">
                         <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-sm">
                           <MessageSquare size={40} className="text-gray-200" />
@@ -1431,7 +1415,7 @@ export default function ManagerDashboard() {
             <h2 className="text-3xl font-black text-gray-800">Suas Matrizes</h2>
             <div className="flex items-center gap-4">
               <span className="bg-white px-6 py-2 rounded-full text-sm font-black text-gray-400 shadow-sm border border-gray-100 uppercase tracking-widest">
-                {products.length} itens
+                {(products || []).length} itens
               </span>
             </div>
           </div>
