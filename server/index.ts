@@ -70,20 +70,27 @@ async function startServer() {
     });
   });
 
-  // Listagem de matrizes no bucket
+  // Listagem de matrizes no bucket (PÚBLICA)
   app.get("/api/list-embroidery", async (req: Request, res: Response) => {
     console.log("📂 Listando arquivos no bucket:", bucketName);
     try {
       const gcs = getStorage();
       const [files] = await gcs.bucket(bucketName).getFiles({ prefix: "arquivos-matrizes/" });
-      const fileNames = files
-        .map(file => file.name)
-        .filter(name => name !== "arquivos-matrizes/");
       
-      return res.json({ files: fileNames });
+      const result = files
+        .filter(file => file.name !== "arquivos-matrizes/")
+        .map(file => ({
+          name: file.name.replace("arquivos-matrizes/", ""),
+          url: `https://storage.googleapis.com/${bucketName}/${file.name}`
+        }));
+      
+      return res.json({ 
+        success: true,
+        files: result 
+      });
     } catch (error: any) {
-      console.error("❌ Erro ao listar arquivos:", error.message);
-      return res.status(500).json({ error: "Falha ao listar arquivos no bucket" });
+      console.error("❌ ERRO LIST:", error.message);
+      return res.status(500).json({ error: "Erro ao listar" });
     }
   });
 
@@ -124,18 +131,26 @@ async function startServer() {
         });
       });
 
-      stream.on("finish", () => {
-        const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
-        const baseName = path.parse(fileName).name;
-        const previewUrl = `https://storage.googleapis.com/${bucketName}/imagens-vitrine/${baseName}.png`;
+      stream.on("finish", async () => {
+        try {
+          // Torna o arquivo público conforme solicitado
+          await blob.makePublic();
+          
+          const publicUrl = `https://storage.googleapis.com/${bucketName}/${fileName}`;
+          const baseName = path.parse(fileName).name;
+          const previewUrl = `https://storage.googleapis.com/${bucketName}/imagens-vitrine/${baseName}.png`;
 
-        console.log("✅ Upload concluído com sucesso!");
-        return res.json({
-          success: true,
-          gcsPath: fileName,
-          publicUrl,
-          previewUrl
-        });
+          console.log("✅ Upload concluído e arquivo tornado público!");
+          return res.json({
+            success: true,
+            gcsPath: fileName,
+            publicUrl,
+            previewUrl
+          });
+        } catch (err: any) {
+          console.error("❌ Erro ao tornar arquivo público:", err.message);
+          return res.status(500).json({ error: "Erro ao tornar arquivo público" });
+        }
       });
 
       stream.end(req.file.buffer);
