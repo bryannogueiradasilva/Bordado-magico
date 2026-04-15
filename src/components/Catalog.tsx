@@ -4,6 +4,7 @@ import { Search, Filter, ShoppingCart, Check, X, Shield, Flower2, Heart, CheckCi
 import { Link, useNavigate } from 'react-router-dom';
 import { storage, User, Product, AppConfig } from '../services/storage';
 import { EmbroideryConverter } from '../services/converter';
+import { analyzeEmbroideryFilename } from '../services/gemini';
 import { usePresence } from '../services/presence';
 import { GlobalPresenceBadge } from './PresenceBadge';
 import { cn } from '../lib/utils';
@@ -208,6 +209,10 @@ const EmbroideryAnimation = () => {
 import { API_BASE_URL } from '../config';
 
 export default function Catalog({ user }: CatalogProps) {
+  const generateId = () => {
+    return 'prod_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+  };
+
   const { setCurrentPageId } = usePresence();
   const navigate = useNavigate();
   const [products, setProducts] = useState<Product[]>([]);
@@ -256,22 +261,79 @@ export default function Catalog({ user }: CatalogProps) {
       setLoading(false);
     });
 
-    // 🔥 Garantir que a vitrine use SOMENTE dados da API (Verificação de arquivos)
-    const fetchFiles = async () => {
+    // 🔥 Garantir que a vitrine mostre TODOS os arquivos do GCS
+    const syncFiles = async () => {
       try {
+        console.log("🔄 Verificando novos arquivos no GCS para a vitrine...");
         const res = await fetch(API_BASE_URL + "/api/list-embroidery");
         const data = await res.json();
-        console.log("MATRIZES DA API (GCS):", data.files);
+        const filesList = data.files || [];
         
-        if (!data.files) {
-          // Se a API falhar ou não houver arquivos, não fazemos nada drástico aqui 
-          // pois os produtos vêm do RTDB, mas registramos o log.
+        if (filesList.length === 0) return;
+
+        const allProducts = storage.getProducts();
+        
+        // 1. Identificar arquivos que estão no GCS mas não no banco de dados
+        const existingGcsPaths = new Set(allProducts.map(p => p.gcsPath).filter(Boolean));
+        const missingFiles = filesList.filter((f: string) => !existingGcsPaths.has(f));
+
+        if (missingFiles.length > 0) {
+          console.log(`✨ Vitrine: Encontrados ${missingFiles.length} novos arquivos. Sincronizando...`);
+          
+          const gcsStatusRes = await fetch(API_BASE_URL + '/api/gcs-status');
+          const gcsStatusData = await gcsStatusRes.json();
+          const bucket = gcsStatusData.bucket || 'appbordados';
+
+          const newProducts: Product[] = [];
+          
+          for (const file of missingFiles) {
+            const fileName = file.split('/').pop() || file;
+            const baseName = fileName.split('.').shift() || fileName;
+            
+            // Tenta análise básica via nome (sem bloquear a UI)
+            let analysis = null;
+            try {
+              analysis = await analyzeEmbroideryFilename(fileName) as any;
+            } catch (e) {
+              console.warn("AI analysis failed for synced file:", fileName);
+            }
+
+            const newProduct: Product = {
+              id: generateId(),
+              name: analysis?.name || baseName,
+              description: analysis?.description || `Matriz de bordado sincronizada: ${fileName}`,
+              price: 19.90,
+              imageUrl: `https://storage.googleapis.com/${bucket}/imagens-vitrine/${baseName}.png`,
+              fileUrl: `https://storage.googleapis.com/${bucket}/${file}`,
+              fileName: fileName,
+              gcsPath: file,
+              category: analysis?.category || 'Novidades',
+              createdAt: new Date().toISOString(),
+              soldCount: 0,
+              reviews: []
+            };
+            newProducts.push(newProduct);
+          }
+
+          if (newProducts.length > 0) {
+            const updatedProducts = [...allProducts, ...newProducts];
+            storage.saveProducts(updatedProducts);
+            setProducts(updatedProducts);
+            
+            // Sincroniza com o RTDB (Público tem permissão de escrita em 'products')
+            try {
+              await storage.syncProductsToRTDB(updatedProducts);
+              console.log("✅ Vitrine atualizada com novos arquivos do GCS.");
+            } catch (e) {
+              console.warn("Erro ao sincronizar novos arquivos com RTDB (Vitrine):", e);
+            }
+          }
         }
       } catch (err) {
-        console.error("Erro ao verificar arquivos da API:", err);
+        console.error("Erro na sincronização da vitrine:", err);
       }
     };
-    fetchFiles();
+    syncFiles();
 
     // Poll for config and favorites (still local for now)
     const interval = setInterval(() => {
